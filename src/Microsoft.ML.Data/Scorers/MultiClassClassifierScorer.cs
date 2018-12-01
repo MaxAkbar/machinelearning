@@ -2,11 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Float = System.Single;
-
-using System;
-using System.Collections.Generic;
-using System.Threading;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Data.IO;
@@ -16,6 +12,10 @@ using Microsoft.ML.Runtime.Model.Onnx;
 using Microsoft.ML.Runtime.Model.Pfa;
 using Microsoft.ML.Runtime.Numeric;
 using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using Float = System.Single;
 
 [assembly: LoadableClass(typeof(MultiClassClassifierScorer),
     typeof(MultiClassClassifierScorer.Arguments), typeof(SignatureDataScorer),
@@ -77,8 +77,8 @@ namespace Microsoft.ML.Runtime.Data
             private readonly Func<ISchemaBoundMapper, ColumnType, bool> _canWrap;
 
             public VectorType Type => _type;
-            public bool CanSavePfa => (_bindable as ICanSavePfa)?.CanSavePfa == true;
-            public bool CanSaveOnnx => (_bindable as ICanSaveOnnx)?.CanSaveOnnx == true;
+            bool ICanSavePfa.CanSavePfa => (_bindable as ICanSavePfa)?.CanSavePfa == true;
+            bool ICanSaveOnnx.CanSaveOnnx(OnnxContext ctx) => (_bindable as ICanSaveOnnx)?.CanSaveOnnx(ctx) == true;
             public ISchemaBindableMapper InnerBindable => _bindable;
 
             private static VersionInfo GetVersionInfo()
@@ -196,20 +196,20 @@ namespace Microsoft.ML.Runtime.Data
                     throw _host.Except("We do not know how to serialize label names of type '{0}'", _type.ItemType);
             }
 
-            public void SaveAsPfa(BoundPfaContext ctx, RoleMappedSchema schema, string[] outputNames)
+            void IBindableCanSavePfa.SaveAsPfa(BoundPfaContext ctx, RoleMappedSchema schema, string[] outputNames)
             {
                 Contracts.CheckValue(ctx, nameof(ctx));
                 Contracts.CheckValue(schema, nameof(schema));
-                Contracts.Check(CanSavePfa, "Cannot be saved as PFA");
+                Contracts.Check(((ICanSavePfa)this).CanSavePfa, "Cannot be saved as PFA");
                 Contracts.Assert(_bindable is IBindableCanSavePfa);
                 ((IBindableCanSavePfa)_bindable).SaveAsPfa(ctx, schema, outputNames);
             }
 
-            public bool SaveAsOnnx(OnnxContext ctx, RoleMappedSchema schema, string[] outputNames)
+            bool IBindableCanSaveOnnx.SaveAsOnnx(OnnxContext ctx, RoleMappedSchema schema, string[] outputNames)
             {
                 Contracts.CheckValue(ctx, nameof(ctx));
                 Contracts.CheckValue(schema, nameof(schema));
-                Contracts.Check(CanSaveOnnx, "Cannot be saved as ONNX.");
+                Contracts.Check(((ICanSaveOnnx)this).CanSaveOnnx(ctx), "Cannot be saved as ONNX.");
                 Contracts.Assert(_bindable is IBindableCanSaveOnnx);
                 return ((IBindableCanSaveOnnx)_bindable).SaveAsOnnx(ctx, schema, outputNames);
             }
@@ -250,10 +250,9 @@ namespace Microsoft.ML.Runtime.Data
                 private LabelNameBindableMapper _bindable;
                 private readonly Func<ISchemaBoundMapper, ColumnType, bool> _canWrap;
 
-                public ISchema Schema => _outSchema;
-
                 public RoleMappedSchema InputRoleMappedSchema => _mapper.InputRoleMappedSchema;
-                public ISchema InputSchema => _mapper.InputSchema;
+                public Schema InputSchema => _mapper.InputSchema;
+                public Schema OutputSchema => _outSchema.AsSchema;
 
                 public ISchemaBindableMapper Bindable
                 {
@@ -286,7 +285,7 @@ namespace Microsoft.ML.Runtime.Data
                     _mapper = mapper;
 
                     int scoreIdx;
-                    bool result = mapper.Schema.TryGetColumnIndex(MetadataUtils.Const.ScoreValueKind.Score, out scoreIdx);
+                    bool result = mapper.OutputSchema.TryGetColumnIndex(MetadataUtils.Const.ScoreValueKind.Score, out scoreIdx);
                     if (!result)
                         throw env.ExceptParam(nameof(mapper), "Mapper did not have a '{0}' column", MetadataUtils.Const.ScoreValueKind.Score);
 
@@ -294,7 +293,7 @@ namespace Microsoft.ML.Runtime.Data
                     _labelNameGetter = getter;
                     _metadataKind = metadataKind;
 
-                    _outSchema = new SchemaImpl(mapper.Schema, scoreIdx, _labelNameType, _labelNameGetter, _metadataKind);
+                    _outSchema = new SchemaImpl(mapper.OutputSchema, scoreIdx, _labelNameType, _labelNameGetter, _metadataKind);
                     _canWrap = canWrap;
                 }
 
@@ -311,7 +310,7 @@ namespace Microsoft.ML.Runtime.Data
                 public IRow GetRow(IRow input, Func<int, bool> predicate, out Action disposer)
                 {
                     var innerRow = _mapper.GetRow(input, predicate, out disposer);
-                    return new RowImpl(innerRow, Schema);
+                    return new RowImpl(innerRow, OutputSchema);
                 }
 
                 private sealed class SchemaImpl : ISchema
@@ -321,6 +320,8 @@ namespace Microsoft.ML.Runtime.Data
                     private readonly VectorType _labelNameType;
                     private readonly MetadataUtils.MetadataGetter<VBuffer<T>> _labelNameGetter;
                     private readonly string _metadataKind;
+
+                    public Schema AsSchema { get; }
 
                     public int ColumnCount { get { return _parent.ColumnCount; } }
 
@@ -340,6 +341,8 @@ namespace Microsoft.ML.Runtime.Data
                         // We change to this metadata variant of the getter to enable the marshal call to work.
                         _labelNameGetter = (int c, ref VBuffer<T> val) => getter(ref val);
                         _metadataKind = metadataKind;
+
+                        AsSchema = Schema.Create(this);
                     }
 
                     public bool TryGetColumnIndex(string name, out int col)
@@ -386,14 +389,14 @@ namespace Microsoft.ML.Runtime.Data
                 private sealed class RowImpl : IRow
                 {
                     private readonly IRow _row;
-                    private readonly ISchema _schema;
+                    private readonly Schema _schema;
 
                     public long Batch { get { return _row.Batch; } }
                     public long Position { get { return _row.Position; } }
                     // The schema is of course the only difference from _row.
-                    public ISchema Schema { get { return _schema; } }
+                    public Schema Schema => _schema;
 
-                    public RowImpl(IRow row, ISchema schema)
+                    public RowImpl(IRow row, Schema schema)
                     {
                         Contracts.AssertValue(row);
                         Contracts.AssertValue(schema);
@@ -466,7 +469,7 @@ namespace Microsoft.ML.Runtime.Data
             if (rowMapper == null)
                 return false; // We could cover this case, but it is of no practical worth as far as I see, so I decline to do so.
 
-            ISchema outSchema = mapper.Schema;
+            ISchema outSchema = mapper.OutputSchema;
             int scoreIdx;
             if (!outSchema.TryGetColumnIndex(MetadataUtils.Const.ScoreValueKind.Score, out scoreIdx))
                 return false; // The mapper doesn't even publish a score column to attach the metadata to.
@@ -551,7 +554,7 @@ namespace Microsoft.ML.Runtime.Data
         protected override Delegate GetPredictedLabelGetter(IRow output, out Delegate scoreGetter)
         {
             Host.AssertValue(output);
-            Host.Assert(output.Schema == Bindings.RowMapper.Schema);
+            Host.Assert(output.Schema == Bindings.RowMapper.OutputSchema);
             Host.Assert(output.IsColumnActive(Bindings.ScoreColumnIndex));
 
             ValueGetter<VBuffer<Float>> mapperScoreGetter = output.GetGetter<VBuffer<Float>>(Bindings.ScoreColumnIndex);
@@ -565,7 +568,7 @@ namespace Microsoft.ML.Runtime.Data
                 {
                     EnsureCachedPosition(ref cachedPosition, ref score, output, mapperScoreGetter);
                     Host.Check(score.Length == scoreLength);
-                    int index = VectorUtils.ArgMax(ref score);
+                    int index = VectorUtils.ArgMax(in score);
                     if (index < 0)
                         dst = 0;
                     else

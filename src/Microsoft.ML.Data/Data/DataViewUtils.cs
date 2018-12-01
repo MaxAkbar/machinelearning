@@ -9,6 +9,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime.Data.Conversion;
 using Microsoft.ML.Runtime.Internal.Utilities;
 
@@ -77,7 +78,7 @@ namespace Microsoft.ML.Runtime.Data
         /// </summary>
         public static long ComputeRowCount(IDataView view)
         {
-            long? countNullable = view.GetRowCount(lazy: false);
+            long? countNullable = view.GetRowCount();
             if (countNullable != null)
                 return countNullable.Value;
             long count = 0;
@@ -114,7 +115,7 @@ namespace Microsoft.ML.Runtime.Data
         /// the target cardinality of the cursor set.
         /// </summary>
         public static bool TryCreateConsolidatingCursor(out IRowCursor curs,
-            IDataView view, Func<int, bool> predicate, IHost host, IRandom rand)
+            IDataView view, Func<int, bool> predicate, IHost host, Random rand)
         {
             Contracts.CheckValue(host, nameof(host));
             host.CheckValue(view, nameof(view));
@@ -264,7 +265,7 @@ namespace Microsoft.ML.Runtime.Data
         /// thusfar, and inserted into a blocking collection. The output cursor or cursors likewise
         /// have a set of "out pipe" instances, one per each of the active columns, through which
         /// successive batches are presented for consumption by the user of the output cursors. Of
-        /// course, both split and consolidate have many details from which they differ, e.g., the
+        /// course, both split and consolidate have many details from which they differ, for example, the
         /// consolidator must accept batches as they come and reconcile them among multiple inputs,
         /// while the splitter is more free.
         ///
@@ -274,7 +275,7 @@ namespace Microsoft.ML.Runtime.Data
         /// </summary>
         private sealed class Splitter
         {
-            private readonly ISchema _schema;
+            private readonly Schema _schema;
             private readonly object[] _cachePools;
             private object[] _consolidateCachePools;
 
@@ -291,7 +292,7 @@ namespace Microsoft.ML.Runtime.Data
 #pragma warning restore MSML_GeneralName
             }
 
-            private Splitter(ISchema schema)
+            private Splitter(Schema schema)
             {
                 Contracts.AssertValue(schema);
                 _schema = schema;
@@ -318,9 +319,7 @@ namespace Microsoft.ML.Runtime.Data
                     Contracts.AssertValue(provider);
                     using (var ch = provider.Start("Consolidate"))
                     {
-                        var cursor = ConsolidateCore(provider, inputs, ref ourPools, ch);
-                        ch.Done();
-                        return cursor;
+                        return ConsolidateCore(provider, inputs, ref ourPools, ch);
                     }
                 }
 
@@ -332,7 +331,7 @@ namespace Microsoft.ML.Runtime.Data
                     ch.CheckParam(SameSchemaAndActivity(inputs), nameof(inputs), "Inputs not compatible for consolidation");
 
                     IRowCursor cursor = inputs[0];
-                    ISchema schema = cursor.Schema;
+                    var schema = cursor.Schema;
                     ch.CheckParam(AllCachable(schema, cursor.IsColumnActive), nameof(inputs), "Inputs had some uncachable input columns");
 
                     int[] activeToCol;
@@ -495,7 +494,7 @@ namespace Microsoft.ML.Runtime.Data
                 }
             }
 
-            public static IRowCursor[] Split(out IRowCursorConsolidator consolidator, IChannelProvider provider, ISchema schema, IRowCursor input, int cthd)
+            public static IRowCursor[] Split(out IRowCursorConsolidator consolidator, IChannelProvider provider, Schema schema, IRowCursor input, int cthd)
             {
                 Contracts.AssertValue(provider, "provider");
 
@@ -503,7 +502,6 @@ namespace Microsoft.ML.Runtime.Data
                 using (var ch = provider.Start("CursorSplitter"))
                 {
                     var result = splitter.SplitCore(out consolidator, provider, input, cthd);
-                    ch.Done();
                     return result;
                 }
             }
@@ -1003,7 +1001,7 @@ namespace Microsoft.ML.Runtime.Data
             /// </summary>
             private sealed class Cursor : RootCursorBase, IRowCursor
             {
-                private readonly ISchema _schema;
+                private readonly Schema _schema;
                 private readonly int[] _activeToCol;
                 private readonly int[] _colToActive;
                 private readonly OutPipe[] _pipes;
@@ -1016,10 +1014,7 @@ namespace Microsoft.ML.Runtime.Data
                 private long _batch;
                 private bool _disposed;
 
-                public ISchema Schema
-                {
-                    get { return _schema; }
-                }
+                public Schema Schema => _schema;
 
                 public override long Batch
                 {
@@ -1037,7 +1032,7 @@ namespace Microsoft.ML.Runtime.Data
                 /// <param name="pipes">The output pipes, one per channel of information</param>
                 /// <param name="batchInputs"></param>
                 /// <param name="quitAction"></param>
-                public Cursor(IChannelProvider provider, ISchema schema, int[] activeToCol, int[] colToActive,
+                public Cursor(IChannelProvider provider, Schema schema, int[] activeToCol, int[] colToActive,
                     OutPipe[] pipes, BlockingCollection<Batch> batchInputs, Action quitAction)
                     : base(provider)
                 {
@@ -1146,7 +1141,7 @@ namespace Microsoft.ML.Runtime.Data
             private readonly IRowCursor[] _cursors;
             private readonly Delegate[] _getters;
 
-            private readonly ISchema _schema;
+            private readonly Schema _schema;
             private readonly Heap<CursorStats> _mins;
             private readonly int[] _activeToCol;
             private readonly int[] _colToActive;
@@ -1160,7 +1155,7 @@ namespace Microsoft.ML.Runtime.Data
             private IRowCursor _currentCursor;
             private bool _disposed;
 
-            private struct CursorStats
+            private readonly struct CursorStats
             {
                 public readonly long Batch;
                 public readonly int CursorIdx;
@@ -1176,7 +1171,7 @@ namespace Microsoft.ML.Runtime.Data
             // input batch as our own batch. Should we suppress it?
             public override long Batch { get { return _batch; } }
 
-            public ISchema Schema { get { return _schema; } }
+            public Schema Schema => _schema;
 
             public SynchronousConsolidatingCursor(IChannelProvider provider, IRowCursor[] cursors)
                 : base(provider)
@@ -1348,7 +1343,7 @@ namespace Microsoft.ML.Runtime.Data
             if (!Conversions.Instance.TryGetStringConversion<T>(colType, out conversion))
             {
                 var error = $"Cannot display {colType}";
-                conversion = (ref T src, ref StringBuilder builder) =>
+                conversion = (in T src, ref StringBuilder builder) =>
                 {
                     if (builder == null)
                         builder = new StringBuilder();
@@ -1363,7 +1358,7 @@ namespace Microsoft.ML.Runtime.Data
                 (ref ReadOnlyMemory<char> value) =>
                 {
                     floatGetter(ref v);
-                    conversion(ref v, ref dst);
+                    conversion(in v, ref dst);
                     string text = dst.ToString();
                     value = text.AsMemory();
                 };
@@ -1390,7 +1385,7 @@ namespace Microsoft.ML.Runtime.Data
                             x =>
                             {
                                 var v = x.Value;
-                                conversion(ref v, ref dst);
+                                conversion(in v, ref dst);
                                 return dst.ToString();
                             }));
                     value = string.Format("<{0}{1}>", stringRep, suffix).AsMemory();

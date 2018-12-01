@@ -237,7 +237,7 @@ namespace Microsoft.ML.Runtime.Training
         /// Create a row cursor for the RoleMappedData with the indicated standard columns active.
         /// This does not verify that the columns exist, but merely activates the ones that do exist.
         /// </summary>
-        public static IRowCursor CreateRowCursor(this RoleMappedData data, CursOpt opt, IRandom rand, IEnumerable<int> extraCols = null)
+        public static IRowCursor CreateRowCursor(this RoleMappedData data, CursOpt opt, Random rand, IEnumerable<int> extraCols = null)
             => data.Data.GetRowCursor(CreatePredicate(data, opt, extraCols), rand);
 
         /// <summary>
@@ -245,7 +245,7 @@ namespace Microsoft.ML.Runtime.Training
         /// This does not verify that the columns exist, but merely activates the ones that do exist.
         /// </summary>
         public static IRowCursor[] CreateRowCursorSet(this RoleMappedData data, out IRowCursorConsolidator consolidator,
-            CursOpt opt, int n, IRandom rand, IEnumerable<int> extraCols = null)
+            CursOpt opt, int n, Random rand, IEnumerable<int> extraCols = null)
             => data.Data.GetRowCursorSet(out consolidator, CreatePredicate(data, opt, extraCols), n, rand);
 
         private static void AddOpt(HashSet<int> cols, ColumnInfo info)
@@ -362,9 +362,14 @@ namespace Microsoft.ML.Runtime.Training
         /// <summary>
         /// The <see cref="SchemaShape.Column"/> for the label column for regression tasks.
         /// </summary>
-        /// <param name="labelColumn">name of the weight column</param>
-        public static SchemaShape.Column MakeU4ScalarLabel(string labelColumn)
-            => new SchemaShape.Column(labelColumn, SchemaShape.Column.VectorKind.Scalar, NumberType.U4, true);
+        /// <param name="columnName">name of the weight column</param>
+        public static SchemaShape.Column MakeU4ScalarColumn(string columnName)
+        {
+            if (columnName == null)
+                return null;
+
+            return new SchemaShape.Column(columnName, SchemaShape.Column.VectorKind.Scalar, NumberType.U4, true);
+        }
 
         /// <summary>
         /// The <see cref="SchemaShape.Column"/> for the feature column.
@@ -377,41 +382,12 @@ namespace Microsoft.ML.Runtime.Training
         /// The <see cref="SchemaShape.Column"/> for the weight column.
         /// </summary>
         /// <param name="weightColumn">name of the weight column</param>
-        public static SchemaShape.Column MakeR4ScalarWeightColumn(string weightColumn)
+        /// <param name="isExplicit">whether the column is implicitly, or explicitly defined</param>
+        public static SchemaShape.Column MakeR4ScalarWeightColumn(string weightColumn, bool isExplicit = true)
         {
-            if (weightColumn == null)
+            if (weightColumn == null || !isExplicit)
                 return null;
             return new SchemaShape.Column(weightColumn, SchemaShape.Column.VectorKind.Scalar, NumberType.R4, false);
-        }
-
-        /// <summary>
-        /// Check that the label, feature, weights, groupId column names are not supplied in the args of the constructor, through the advancedSettings parameter,
-        /// for cases when the public constructor is called.
-        /// The recommendation is to set the column names directly.
-        /// </summary>
-        public static void CheckArgsHaveDefaultColNames(IHostEnvironment host, LearnerInputBaseWithGroupId args)
-        {
-            Action<string, string> checkArgColName = (defaultColName, argValue) =>
-            {
-                if (argValue != defaultColName)
-                    throw host.Except($"Don't supply a value for the {defaultColName} column in the arguments, as it will be ignored. Specify them in the loader, or constructor instead instead.");
-            };
-
-            // check that the users didn't specify different label, group, feature, weights in the args, from what they supplied directly
-            checkArgColName(DefaultColumnNames.Label, args.LabelColumn);
-            checkArgColName(DefaultColumnNames.Features, args.FeatureColumn);
-            checkArgColName(DefaultColumnNames.Weight, args.WeightColumn);
-
-            if(args.GroupIdColumn != null)
-                checkArgColName(DefaultColumnNames.GroupId, args.GroupIdColumn);
-        }
-
-        public static void CheckArgsAndAdvancedSettingMismatch<T>(IChannel channel, T methodParam, T defaultVal, T setting, string argName)
-        {
-            // if, after applying the advancedArgs delegate, the args are different that the default value
-            // and are also different than the value supplied directly to the xtension method, warn the user.
-            if (!setting.Equals(defaultVal) && !setting.Equals(methodParam))
-                channel.Warning($"The value supplied to advanced settings , is different than the value supplied directly. Using value {setting} for {argName}");
         }
     }
 
@@ -452,7 +428,7 @@ namespace Microsoft.ML.Runtime.Training
             _signal = signal;
         }
 
-        protected static IRowCursor CreateCursor(RoleMappedData data, CursOpt opt, IRandom rand, params int[] extraCols)
+        protected static IRowCursor CreateCursor(RoleMappedData data, CursOpt opt, Random rand, params int[] extraCols)
         {
             Contracts.AssertValue(data);
             Contracts.AssertValueOrNull(rand);
@@ -555,13 +531,13 @@ namespace Microsoft.ML.Runtime.Training
             }
 
             /// <summary>
-            /// The typed analog to <see cref="IDataView.GetRowCursor(Func{int,bool},IRandom)"/>.
+            /// The typed analog to <see cref="IDataView.GetRowCursor(Func{int,bool},Random)"/>.
             /// </summary>
             /// <param name="rand">Non-null if we are requesting a shuffled cursor.</param>
             /// <param name="extraCols">The extra columns to activate on the row cursor
             /// in addition to those required by the factory's options.</param>
             /// <returns>The wrapping typed cursor.</returns>
-            public TCurs Create(IRandom rand = null, params int[] extraCols)
+            public TCurs Create(Random rand = null, params int[] extraCols)
             {
                 CursOpt opt;
                 lock (_lock)
@@ -582,7 +558,7 @@ namespace Microsoft.ML.Runtime.Training
             /// in addition to those required by the factory's options.</param>
             /// <returns>The cursor set. Note that this needn't necessarily be of size
             /// <paramref name="n"/>.</returns>
-            public TCurs[] CreateSet(int n, IRandom rand = null, params int[] extraCols)
+            public TCurs[] CreateSet(int n, Random rand = null, params int[] extraCols)
             {
                 CursOpt opt;
                 lock (_lock)
@@ -677,7 +653,7 @@ namespace Microsoft.ML.Runtime.Training
         public ulong Group;
         public UInt128 Id;
 
-        public StandardScalarCursor(RoleMappedData data, CursOpt opt, IRandom rand = null, params int[] extraCols)
+        public StandardScalarCursor(RoleMappedData data, CursOpt opt, Random rand = null, params int[] extraCols)
             : this(CreateCursor(data, opt, rand, extraCols), data, opt)
         {
         }
@@ -767,7 +743,7 @@ namespace Microsoft.ML.Runtime.Training
         public VBuffer<float> Features;
 
         public FeatureFloatVectorCursor(RoleMappedData data, CursOpt opt = CursOpt.Features,
-            IRandom rand = null, params int[] extraCols)
+            Random rand = null, params int[] extraCols)
             : this(CreateCursor(data, opt, rand, extraCols), data, opt)
         {
         }
@@ -797,7 +773,7 @@ namespace Microsoft.ML.Runtime.Training
             if (_get != null)
             {
                 _get(ref Features);
-                if (!_keepBad && !FloatUtils.IsFinite(Features.Values, Features.Count))
+                if (!_keepBad && !FloatUtils.IsFinite(Features.GetValues()))
                 {
                     _badCount++;
                     return false;
@@ -835,7 +811,7 @@ namespace Microsoft.ML.Runtime.Training
         public float Label;
 
         public FloatLabelCursor(RoleMappedData data, CursOpt opt = CursOpt.Label,
-            IRandom rand = null, params int[] extraCols)
+            Random rand = null, params int[] extraCols)
             : this(CreateCursor(data, opt, rand, extraCols), data, opt)
         {
         }
@@ -904,7 +880,7 @@ namespace Microsoft.ML.Runtime.Training
         public int Label;
 
         public MultiClassLabelCursor(int classCount, RoleMappedData data, CursOpt opt = CursOpt.Label,
-            IRandom rand = null, params int[] extraCols)
+            Random rand = null, params int[] extraCols)
             : this(classCount, CreateCursor(data, opt, rand, extraCols), data, opt)
         {
         }

@@ -3,10 +3,12 @@
 // See the LICENSE file in the project root for more information.
 
 using Microsoft.ML.Core.Data;
+using Microsoft.ML.Runtime;
+using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Model;
 using System.IO;
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Data
 {
     /// <summary>
     /// This class represents a data reader that applies a transformer chain after reading.
@@ -40,7 +42,7 @@ namespace Microsoft.ML.Runtime.Data
             return idv;
         }
 
-        public ISchema GetOutputSchema()
+        public Schema GetOutputSchema()
         {
             var s = Reader.GetOutputSchema();
             return Transformer.GetOutputSchema(s);
@@ -87,6 +89,12 @@ namespace Microsoft.ML.Runtime.Data
     /// </summary>
     public static class CompositeDataReader
     {
+        /// <summary>
+        /// Save the contents to a stream, as a "model file".
+        /// </summary>
+        public static void SaveTo<TSource>(this IDataReader<TSource> reader, IHostEnvironment env, Stream outputStream)
+            => new CompositeDataReader<TSource, ITransformer>(reader).SaveTo(env, outputStream);
+
         /// <summary>
         /// Load the pipeline from stream.
         /// </summary>

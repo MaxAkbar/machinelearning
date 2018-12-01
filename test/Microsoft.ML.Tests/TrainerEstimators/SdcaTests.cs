@@ -2,12 +2,9 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Core.Data;
 using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Learners;
-using Microsoft.ML.Runtime.RunTests;
+using Microsoft.ML.Trainers;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace Microsoft.ML.Tests.TrainerEstimators
 {
@@ -19,16 +16,15 @@ namespace Microsoft.ML.Tests.TrainerEstimators
             var dataPath = GetDataPath("breast-cancer.txt");
 
             var data = TextLoader.CreateReader(Env, ctx => (Label: ctx.LoadFloat(0), Features: ctx.LoadFloat(1, 10)))
-                .Read(new MultiFileSource(dataPath));
+                .Read(dataPath);
+            var binaryTrainer = new SdcaBinaryTrainer(Env, "Label", "Features", advancedSettings: (s) => s.ConvergenceTolerance = 1e-2f);
+            TestEstimatorCore(binaryTrainer, data.AsDynamic);
 
-            IEstimator<ITransformer> est = new LinearClassificationTrainer(Env, new LinearClassificationTrainer.Arguments { ConvergenceTolerance = 1e-2f }, "Features", "Label");
-            TestEstimatorCore(est, data.AsDynamic);
+            var regressionTrainer = new SdcaRegressionTrainer(Env, "Label", "Features", advancedSettings: (s) => s.ConvergenceTolerance = 1e-2f);
+            TestEstimatorCore(regressionTrainer, data.AsDynamic);
 
-            est = new SdcaRegressionTrainer(Env, new SdcaRegressionTrainer.Arguments { ConvergenceTolerance = 1e-2f }, "Features", "Label");
-            TestEstimatorCore(est, data.AsDynamic);
-
-            est = new SdcaMultiClassTrainer(Env, new SdcaMultiClassTrainer.Arguments { ConvergenceTolerance = 1e-2f }, "Features", "Label");
-            TestEstimatorCore(est, data.AsDynamic);
+            var mcTrainer = new SdcaMultiClassTrainer(Env, "Label", "Features", advancedSettings: (s) => s.ConvergenceTolerance = 1e-2f);
+            TestEstimatorCore(mcTrainer, data.AsDynamic);
 
             Done();
         }

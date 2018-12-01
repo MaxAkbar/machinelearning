@@ -5,6 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
@@ -40,6 +41,8 @@ namespace Microsoft.ML.Runtime.Data
             // The following argument is used only to inform serialization.
             private readonly int[] _dropped;
 
+            public Schema AsSchema { get; }
+
             public Bindings(Arguments args, ISchema schemaInput)
             {
                 Contracts.AssertValue(args);
@@ -49,6 +52,8 @@ namespace Microsoft.ML.Runtime.Data
 
                 int[] indexCopy = args.Index == null ? new int[0] : args.Index.ToArray();
                 BuildNameDict(indexCopy, args.Drop, out Sources, out _dropped, out _nameToIndex, user: true);
+
+                AsSchema = Schema.Create(this);
             }
 
             private void BuildNameDict(int[] indexCopy, bool drop, out int[] sources, out int[] dropped, out Dictionary<string, int> nameToCol, bool user)
@@ -98,6 +103,7 @@ namespace Microsoft.ML.Runtime.Data
 
                 bool isDrop = ctx.Reader.ReadBoolByte();
                 BuildNameDict(ctx.Reader.ReadIntArray() ?? new int[0], isDrop, out Sources, out _dropped, out _nameToIndex, user: false);
+                AsSchema = Schema.Create(this);
             }
 
             public void Save(ModelSaveContext ctx)
@@ -239,7 +245,7 @@ namespace Microsoft.ML.Runtime.Data
             _bindings.Save(ctx);
         }
 
-        public override ISchema Schema { get { return _bindings; } }
+        public override Schema OutputSchema => _bindings.AsSchema;
 
         protected override bool? ShouldUseParallelCursors(Func<int, bool> predicate)
         {
@@ -248,7 +254,7 @@ namespace Microsoft.ML.Runtime.Data
             return null;
         }
 
-        protected override IRowCursor GetRowCursorCore(Func<int, bool> predicate, IRandom rand = null)
+        protected override IRowCursor GetRowCursorCore(Func<int, bool> predicate, Random rand = null)
         {
             Host.AssertValue(predicate, "predicate");
             Host.AssertValueOrNull(rand);
@@ -260,7 +266,7 @@ namespace Microsoft.ML.Runtime.Data
         }
 
         public sealed override IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator,
-            Func<int, bool> predicate, int n, IRandom rand = null)
+            Func<int, bool> predicate, int n, Random rand = null)
         {
             Host.CheckValue(predicate, nameof(predicate));
             Host.CheckValueOrNull(rand);
@@ -292,7 +298,7 @@ namespace Microsoft.ML.Runtime.Data
                 _active = active;
             }
 
-            public ISchema Schema { get { return _bindings; } }
+            public Schema Schema => _bindings.AsSchema;
 
             public bool IsColumnActive(int col)
             {

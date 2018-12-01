@@ -2,35 +2,17 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Internal.Calibration;
 using Microsoft.ML.Runtime.Learners;
-using Microsoft.ML.Runtime.RunTests;
-using System.Linq;
+using Microsoft.ML.Trainers;
+using Microsoft.ML.Trainers.Online;
+using Microsoft.ML.Transforms.Conversions;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace Microsoft.ML.Tests.TrainerEstimators
 {
     public partial class TrainerEstimators
     {
-        /// <summary>
-        /// OVA with calibrator argument
-        /// </summary>
-        [Fact]
-        public void OVAWithExplicitCalibrator()
-        {
-            var (pipeline, data) = GetMultiClassPipeline();
-            var calibrator = new PavCalibratorTrainer(Env);
-
-            var sdcaTrainer = new LinearClassificationTrainer(Env, new LinearClassificationTrainer.Arguments { MaxIterations = 100, Shuffle = true, NumThreads = 1 }, "Features", "Label");
-            pipeline.Append(new Ova(Env, sdcaTrainer, "Label", calibrator: calibrator, maxCalibrationExamples: 990000))
-                    .Append(new KeyToValueEstimator(Env, "PredictedLabel"));
-
-            TestEstimatorCore(pipeline, data);
-            Done();
-        }
-
         /// <summary>
         /// OVA with all constructor args.
         /// </summary>
@@ -39,10 +21,14 @@ namespace Microsoft.ML.Tests.TrainerEstimators
         {
             var (pipeline, data) = GetMultiClassPipeline();
             var calibrator = new PlattCalibratorTrainer(Env);
-            var averagePerceptron = new AveragedPerceptronTrainer(Env, new AveragedPerceptronTrainer.Arguments { FeatureColumn = "Features", LabelColumn = "Label", Shuffle = true, Calibrator = null });
+            var averagePerceptron = new AveragedPerceptronTrainer(Env, "Label", "Features", advancedSettings: s =>
+             {
+                 s.Shuffle = true;
+                 s.Calibrator = null;
+             });
 
-            pipeline.Append(new Ova(Env, averagePerceptron, "Label", true, calibrator: calibrator, 10000, true))
-                    .Append(new KeyToValueEstimator(Env, "PredictedLabel"));
+            pipeline = pipeline.Append(new Ova(Env, averagePerceptron, "Label", true, calibrator: calibrator, 10000, true))
+                    .Append(new KeyToValueMappingEstimator(Env, "PredictedLabel"));
 
             TestEstimatorCore(pipeline, data);
             Done();
@@ -55,11 +41,10 @@ namespace Microsoft.ML.Tests.TrainerEstimators
         public void OVAUncalibrated()
         {
             var (pipeline, data) = GetMultiClassPipeline();
+            var sdcaTrainer = new SdcaBinaryTrainer(Env, "Label", "Features", advancedSettings: (s) => { s.MaxIterations = 100; s.Shuffle = true; s.NumThreads = 1; s.Calibrator = null; });
 
-            var sdcaTrainer = new LinearClassificationTrainer(Env, new LinearClassificationTrainer.Arguments { MaxIterations = 100, Shuffle = true, NumThreads = 1, Calibrator = null }, "Features", "Label");
-
-            pipeline.Append(new Ova(Env, sdcaTrainer, useProbabilities: false))
-                    .Append(new KeyToValueEstimator(Env, "PredictedLabel"));
+            pipeline = pipeline.Append(new Ova(Env, sdcaTrainer, useProbabilities: false))
+                    .Append(new KeyToValueMappingEstimator(Env, "PredictedLabel"));
 
             TestEstimatorCore(pipeline, data);
             Done();
@@ -68,14 +53,14 @@ namespace Microsoft.ML.Tests.TrainerEstimators
         /// <summary>
         /// Pkpd trainer
         /// </summary>
-        [Fact(Skip = "The test fails the check for valid input to fit")]
+        [Fact]
         public void Pkpd()
         {
-            var (pipeline, data) = GetMultiClassPipeline(); 
+            var (pipeline, data) = GetMultiClassPipeline();
 
-            var sdcaTrainer = new LinearClassificationTrainer(Env, new LinearClassificationTrainer.Arguments { MaxIterations = 100, Shuffle = true, NumThreads = 1 }, "Features", "Label");
-            pipeline.Append(new Pkpd(Env, sdcaTrainer))
-                    .Append(new KeyToValueEstimator(Env, "PredictedLabel"));
+            var sdcaTrainer = new SdcaBinaryTrainer(Env, "Label", "Features", advancedSettings: (s) => { s.MaxIterations = 100; s.Shuffle = true; s.NumThreads = 1; });
+            pipeline = pipeline.Append(new Pkpd(Env, sdcaTrainer))
+                    .Append(new KeyToValueMappingEstimator(Env, "PredictedLabel"));
 
             TestEstimatorCore(pipeline, data);
             Done();

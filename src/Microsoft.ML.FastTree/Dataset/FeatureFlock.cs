@@ -12,11 +12,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Internal.CpuMath;
 using Microsoft.ML.Runtime.Internal.Utilities;
 
-namespace Microsoft.ML.Runtime.FastTree.Internal
+namespace Microsoft.ML.Trainers.FastTree.Internal
 {
     /// <summary>
     /// Holds statistics per bin value for a feature. These are yielded by <see cref="SufficientStatsBase.GetBinStats"/>
@@ -24,7 +24,7 @@ namespace Microsoft.ML.Runtime.FastTree.Internal
     /// are then used in <see cref="LeastSquaresRegressionTreeLearner"/> to find splitting on which bin will yield the
     /// best least squares solution
     /// </summary>
-    public struct PerBinStats
+    public readonly struct PerBinStats
     {
         /// <summary>Sum of all target values in a partition for the bin.</summary>
         public readonly Double SumTargets;
@@ -1152,7 +1152,7 @@ namespace Microsoft.ML.Runtime.FastTree.Internal
         /// "logical" bin value for that feature starting from 1.
         ///
         /// Note that it would also have been legal for <paramref name="hotFeatureStarts"/> to be
-        /// larger than the actual observed range, e.g., it could have been:
+        /// larger than the actual observed range, for example, it could have been:
         /// <c><paramref name="hotFeatureStarts"/> = { 1, 5, 8}</c>
         /// or something. This could happen if binning happened over a different dataset from the data
         /// being represented right now, for example, but this is a more complex case.

@@ -5,6 +5,8 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.ComponentModel.Composition;
+using System.ComponentModel.Composition.Hosting;
 using System.IO;
 
 namespace Microsoft.ML.Runtime.Data
@@ -13,7 +15,8 @@ namespace Microsoft.ML.Runtime.Data
     /// Base class for channel providers. This is a common base class for<see cref="HostEnvironmentBase{THostEnvironmentBase}"/>.
     /// The ParentFullName, ShortName, and FullName may be null or empty.
     /// </summary>
-    public abstract class ChannelProviderBase : IExceptionContext
+    [BestFriend]
+    internal abstract class ChannelProviderBase : IExceptionContext
     {
         /// <summary>
         /// Data keys that are attached to the exception thrown via the exception context.
@@ -77,33 +80,12 @@ namespace Microsoft.ML.Runtime.Data
     /// <summary>
     /// Message source (a channel) that generated the message being dispatched.
     /// </summary>
-    public interface IMessageSource
+    [BestFriend]
+    internal interface IMessageSource
     {
         string ShortName { get; }
         string FullName { get; }
         bool Verbose { get; }
-    }
-
-    /// <summary>
-    /// A <see cref="IHostEnvironment"/> that is also a channel listener can attach
-    /// listeners for messages, as sent through <see cref="IChannelProvider.StartPipe{TMessage}"/>.
-    /// </summary>
-    public interface IMessageDispatcher : IHostEnvironment
-    {
-        /// <summary>
-        /// Listen on this environment to messages of a particular type.
-        /// </summary>
-        /// <typeparam name="TMessage">The message type</typeparam>
-        /// <param name="listenerFunc">The action to perform when a message of the
-        /// appropriate type is received.</param>
-        void AddListener<TMessage>(Action<IMessageSource, TMessage> listenerFunc);
-
-        /// <summary>
-        /// Removes a previously added listener.
-        /// </summary>
-        /// <typeparam name="TMessage">The message type</typeparam>
-        /// <param name="listenerFunc">The previous listener function that is now being removed.</param>
-        void RemoveListener<TMessage>(Action<IMessageSource, TMessage> listenerFunc);
     }
 
     /// <summary>
@@ -112,7 +94,8 @@ namespace Microsoft.ML.Runtime.Data
     /// AddListener/RemoveListener methods, and exposes the <see cref="ProgressReporting.ProgressTracker"/> to
     /// query progress.
     /// </summary>
-    public abstract class HostEnvironmentBase<TEnv> : ChannelProviderBase, IHostEnvironment, IDisposable, IChannelProvider, IMessageDispatcher
+    [BestFriend]
+    internal abstract class HostEnvironmentBase<TEnv> : ChannelProviderBase, IHostEnvironment, IDisposable, IChannelProvider
         where TEnv : HostEnvironmentBase<TEnv>
     {
         /// <summary>
@@ -124,12 +107,12 @@ namespace Microsoft.ML.Runtime.Data
         {
             public override int Depth { get; }
 
-            public IRandom Rand => _rand;
+            public Random Rand => _rand;
 
             // We don't have dispose mechanism for hosts, so to let GC collect children hosts we make them WeakReference.
             private readonly List<WeakReference<IHost>> _children;
 
-            public HostBase(HostEnvironmentBase<TEnv> source, string shortName, string parentFullName, IRandom rand, bool verbose, int? conc)
+            public HostBase(HostEnvironmentBase<TEnv> source, string shortName, string parentFullName, Random rand, bool verbose, int? conc)
                 : base(source, rand, verbose, conc, shortName, parentFullName)
             {
                 Depth = source.Depth + 1;
@@ -156,7 +139,7 @@ namespace Microsoft.ML.Runtime.Data
                 IHost host;
                 lock (_cancelLock)
                 {
-                    IRandom rand = (seed.HasValue) ? RandomUtils.Create(seed.Value) : RandomUtils.Create(_rand);
+                    Random rand = (seed.HasValue) ? RandomUtils.Create(seed.Value) : RandomUtils.Create(_rand);
                     host = RegisterCore(this, name, Master?.FullName, rand, verbose ?? Verbose, conc ?? _conc);
                     if (!IsCancelled)
                         _children.Add(new WeakReference<IHost>(host));
@@ -174,15 +157,12 @@ namespace Microsoft.ML.Runtime.Data
         {
             public override int Depth { get; }
 
-            /// <summary>
-            /// Whether this pipe is still active.
-            /// </summary>
-            public bool IsActive { get; private set; }
-
             // The delegate to call to dispatch messages.
             protected readonly Action<IMessageSource, TMessage> Dispatch;
 
             public readonly ChannelProviderBase Parent;
+
+            private bool _disposed;
 
             protected PipeBase(ChannelProviderBase parent, string shortName,
                 Action<IMessageSource, TMessage> dispatch)
@@ -192,23 +172,20 @@ namespace Microsoft.ML.Runtime.Data
                 Contracts.AssertValue(dispatch);
                 Parent = parent;
                 Depth = parent.Depth + 1;
-                IsActive = true;
                 Dispatch = dispatch;
-            }
-
-            public virtual void Done()
-            {
-                IsActive = false;
             }
 
             public void Dispose()
             {
-                DisposeCore();
+                if(!_disposed)
+                {
+                    Dispose(true);
+                    _disposed = true;
+                }
             }
 
-            protected virtual void DisposeCore()
+            protected virtual void Dispose(bool disposing)
             {
-                IsActive = false;
             }
 
             public void Send(TMessage msg)
@@ -365,7 +342,7 @@ namespace Microsoft.ML.Runtime.Data
         private readonly object _cancelLock;
 
         // The random number generator for this host.
-        private readonly IRandom _rand;
+        private readonly Random _rand;
         // A dictionary mapping the type of message to the Dispatcher that gets the strongly typed dispatch delegate.
         protected readonly ConcurrentDictionary<Type, Dispatcher> ListenerDict;
 
@@ -390,7 +367,7 @@ namespace Microsoft.ML.Runtime.Data
         /// <summary>
         ///  The main constructor.
         /// </summary>
-        protected HostEnvironmentBase(IRandom rand, bool verbose, int conc,
+        protected HostEnvironmentBase(Random rand, bool verbose, int conc,
             string shortName = null, string parentFullName = null)
             : base(shortName, parentFullName, verbose)
         {
@@ -409,7 +386,7 @@ namespace Microsoft.ML.Runtime.Data
         /// <summary>
         /// This constructor is for forking.
         /// </summary>
-        protected HostEnvironmentBase(HostEnvironmentBase<TEnv> source, IRandom rand, bool verbose,
+        protected HostEnvironmentBase(HostEnvironmentBase<TEnv> source, Random rand, bool verbose,
             int? conc, string shortName = null, string parentFullName = null)
             : base(shortName, parentFullName, verbose)
         {
@@ -456,12 +433,12 @@ namespace Microsoft.ML.Runtime.Data
         public IHost Register(string name, int? seed = null, bool? verbose = null, int? conc = null)
         {
             Contracts.CheckNonEmpty(name, nameof(name));
-            IRandom rand = (seed.HasValue) ? RandomUtils.Create(seed.Value) : RandomUtils.Create(_rand);
+            Random rand = (seed.HasValue) ? RandomUtils.Create(seed.Value) : RandomUtils.Create(_rand);
             return RegisterCore(this, name, Master?.FullName, rand, verbose ?? Verbose, conc);
         }
 
         protected abstract IHost RegisterCore(HostEnvironmentBase<TEnv> source, string shortName,
-            string parentFullName, IRandom rand, bool verbose, int? conc);
+            string parentFullName, Random rand, bool verbose, int? conc);
 
         public IFileHandle OpenInputFile(string path)
         {
@@ -699,5 +676,7 @@ namespace Microsoft.ML.Runtime.Data
             else if (!removeLastNewLine)
                 writer.WriteLine();
         }
+
+        public virtual CompositionContainer GetCompositionContainer() => new CompositionContainer();
     }
 }

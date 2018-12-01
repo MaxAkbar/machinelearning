@@ -52,8 +52,6 @@ namespace Microsoft.ML.Runtime.EntryPoints
 
                 _predictor = ModelFileUtils.LoadPredictorOrNull(env, stream);
                 env.CheckDecode(_predictor != null, "Predictor model must contain a predictor");
-
-                ch.Done();
             }
         }
 
@@ -84,7 +82,6 @@ namespace Microsoft.ML.Runtime.EntryPoints
                 var roleMappedData = new RoleMappedData(data, _roleMappings, opt: true);
 
                 TrainUtils.SaveModel(env, ch, stream, _predictor, roleMappedData);
-                ch.Done();
             }
         }
 
@@ -127,7 +124,7 @@ namespace Microsoft.ML.Runtime.EntryPoints
             {
                 labelType = trainRms.Label.Type;
                 if (labelType.IsKey &&
-                    trainRms.Schema.HasKeyNames(trainRms.Label.Index, labelType.KeyCount))
+                    trainRms.Schema.HasKeyValues(trainRms.Label.Index, labelType.KeyCount))
                 {
                     VBuffer<ReadOnlyMemory<char>> keyValues = default;
                     trainRms.Schema.GetMetadata(MetadataUtils.Kinds.KeyValues, trainRms.Label.Index,

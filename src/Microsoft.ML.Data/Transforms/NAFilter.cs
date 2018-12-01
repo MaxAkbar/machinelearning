@@ -3,18 +3,17 @@
 // See the LICENSE file in the project root for more information.
 
 // REVIEW: As soon as we stop writing sizeof(Float), or when we retire the double builds, we can remove this.
-using Float = System.Single;
-
-using System;
-using System.Collections.Generic;
-using System.Reflection;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Data.Conversion;
 using Microsoft.ML.Runtime.EntryPoints;
 using Microsoft.ML.Runtime.Internal.Utilities;
 using Microsoft.ML.Runtime.Model;
+using Microsoft.ML.Transforms;
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using Float = System.Single;
 
 [assembly: LoadableClass(NAFilter.Summary, typeof(NAFilter), typeof(NAFilter.Arguments), typeof(SignatureDataTransform),
     NAFilter.FriendlyName, NAFilter.ShortName, "MissingValueFilter", "MissingFilter")]
@@ -24,7 +23,7 @@ using Microsoft.ML.Runtime.Model;
 [assembly: LoadableClass(NAFilter.Summary, typeof(NAFilter), null, typeof(SignatureLoadDataTransform),
     NAFilter.FriendlyName, NAFilter.LoaderSignature, "MissingFeatureFilter")]
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Transforms
 {
     /// <include file='doc.xml' path='doc/members/member[@name="NAFilter"]'/>
     public sealed class NAFilter : FilterBase
@@ -80,7 +79,7 @@ namespace Microsoft.ML.Runtime.Data
         private const string RegistrationName = "MissingValueFilter";
 
         /// <summary>
-        /// Convenience constructor for public facing API.
+        /// Initializes a new instance of <see cref="NAFilter"/>.
         /// </summary>
         /// <param name="env">Host Environment.</param>
         /// <param name="input">Input <see cref="IDataView"/>. This is the output from previous transform or loader.</param>
@@ -114,7 +113,7 @@ namespace Microsoft.ML.Runtime.Data
 
                 var type = schema.GetColumnType(index);
                 if (!TestType(type))
-                    throw Host.ExceptUserArg(nameof(args.Column), "Column '{0}' does not have compatible numeric type", src);
+                    throw Host.ExceptUserArg(nameof(args.Column), $"Column '{src}' has type {type} which does not support missing values, so we cannot filter on them", src);
 
                 _infos[i] = new ColInfo(index, type);
                 _srcIndexToInfoIndex.Add(index, i);
@@ -150,7 +149,7 @@ namespace Microsoft.ML.Runtime.Data
 
                 var type = schema.GetColumnType(index);
                 if (!TestType(type))
-                    throw Host.Except("Column '{0}' does not have compatible numeric type", src);
+                    throw Host.Except($"Column '{src}' has type {type} which does not support missing values, so we cannot filter on them", src);
 
                 _infos[i] = new ColInfo(index, type);
                 _srcIndexToInfoIndex.Add(index, i);
@@ -188,32 +187,12 @@ namespace Microsoft.ML.Runtime.Data
         {
             Contracts.AssertValue(type);
 
-            var itemType = type.ItemType;
-            if (itemType.IsNumber)
-            {
-                switch (itemType.RawKind)
-                {
-                case DataKind.I1:
-                case DataKind.I2:
-                case DataKind.I4:
-                case DataKind.I8:
-                case DataKind.R4:
-                case DataKind.R8:
-                    return true;
-                }
-                return false;
-            }
-            if (itemType.IsText)
+            var itemType = (type as VectorType)?.ItemType ?? type;
+            if (itemType == NumberType.R4)
                 return true;
-            if (itemType.IsBool)
+            if (itemType == NumberType.R8)
                 return true;
-            if (itemType.IsKey)
-                return true;
-            if (itemType.IsTimeSpan)
-                return true;
-            if (itemType.IsDateTime)
-                return true;
-            if (itemType.IsDateTimeZone)
+            if (itemType is KeyType)
                 return true;
             return false;
         }
@@ -225,7 +204,7 @@ namespace Microsoft.ML.Runtime.Data
             return null;
         }
 
-        protected override IRowCursor GetRowCursorCore(Func<int, bool> predicate, IRandom rand = null)
+        protected override IRowCursor GetRowCursorCore(Func<int, bool> predicate, Random rand = null)
         {
             Host.AssertValue(predicate, "predicate");
             Host.AssertValueOrNull(rand);
@@ -237,7 +216,7 @@ namespace Microsoft.ML.Runtime.Data
         }
 
         public override IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator,
-            Func<int, bool> predicate, int n, IRandom rand = null)
+            Func<int, bool> predicate, int n, Random rand = null)
         {
             Host.CheckValue(predicate, nameof(predicate));
             Host.CheckValueOrNull(rand);
@@ -288,15 +267,15 @@ namespace Microsoft.ML.Runtime.Data
                     Contracts.AssertValue(info);
 
                     MethodInfo meth;
-                    if (!info.Type.IsVector)
+                    if (info.Type is VectorType vecType)
                     {
-                        Func<RowCursor, ColInfo, ValueOne<int>> d = CreateOne<int>;
-                        meth = d.GetMethodInfo().GetGenericMethodDefinition().MakeGenericMethod(info.Type.RawType);
+                        Func<RowCursor, ColInfo, ValueVec<int>> d = CreateVec<int>;
+                        meth = d.GetMethodInfo().GetGenericMethodDefinition().MakeGenericMethod(vecType.ItemType.RawType);
                     }
                     else
                     {
-                        Func<RowCursor, ColInfo, ValueVec<int>> d = CreateVec<int>;
-                        meth = d.GetMethodInfo().GetGenericMethodDefinition().MakeGenericMethod(info.Type.ItemType.RawType);
+                        Func<RowCursor, ColInfo, ValueOne<int>> d = CreateOne<int>;
+                        meth = d.GetMethodInfo().GetGenericMethodDefinition().MakeGenericMethod(info.Type.RawType);
                     }
                     return (Value)meth.Invoke(null, new object[] { cursor, info });
                 }
@@ -305,11 +284,11 @@ namespace Microsoft.ML.Runtime.Data
                 {
                     Contracts.AssertValue(cursor);
                     Contracts.AssertValue(info);
-                    Contracts.Assert(!info.Type.IsVector);
+                    Contracts.Assert(!(info.Type is VectorType));
                     Contracts.Assert(info.Type.RawType == typeof(T));
 
                     var getSrc = cursor.Input.GetGetter<T>(info.Index);
-                    var hasBad = Conversions.Instance.GetIsNAPredicate<T>(info.Type);
+                    var hasBad = Runtime.Data.Conversion.Conversions.Instance.GetIsNAPredicate<T>(info.Type);
                     return new ValueOne<T>(cursor, getSrc, hasBad);
                 }
 
@@ -317,21 +296,21 @@ namespace Microsoft.ML.Runtime.Data
                 {
                     Contracts.AssertValue(cursor);
                     Contracts.AssertValue(info);
-                    Contracts.Assert(info.Type.IsVector);
-                    Contracts.Assert(info.Type.ItemType.RawType == typeof(T));
+                    Contracts.Assert(info.Type is VectorType);
+                    Contracts.Assert(info.Type.RawType == typeof(VBuffer<T>));
 
                     var getSrc = cursor.Input.GetGetter<VBuffer<T>>(info.Index);
-                    var hasBad = Conversions.Instance.GetHasMissingPredicate<T>((VectorType)info.Type);
+                    var hasBad = Runtime.Data.Conversion.Conversions.Instance.GetHasMissingPredicate<T>((VectorType)info.Type);
                     return new ValueVec<T>(cursor, getSrc, hasBad);
                 }
 
                 private abstract class TypedValue<T> : Value
                 {
                     private readonly ValueGetter<T> _getSrc;
-                    private readonly RefPredicate<T> _hasBad;
+                    private readonly InPredicate<T> _hasBad;
                     public T Src;
 
-                    protected TypedValue(RowCursor cursor, ValueGetter<T> getSrc, RefPredicate<T> hasBad)
+                    protected TypedValue(RowCursor cursor, ValueGetter<T> getSrc, InPredicate<T> hasBad)
                         : base(cursor)
                     {
                         Contracts.AssertValue(getSrc);
@@ -343,7 +322,7 @@ namespace Microsoft.ML.Runtime.Data
                     public override bool Refresh()
                     {
                         _getSrc(ref Src);
-                        return !_hasBad(ref Src);
+                        return !_hasBad(in Src);
                     }
                 }
 
@@ -351,7 +330,7 @@ namespace Microsoft.ML.Runtime.Data
                 {
                     private readonly ValueGetter<T> _getter;
 
-                    public ValueOne(RowCursor cursor, ValueGetter<T> getSrc, RefPredicate<T> hasBad)
+                    public ValueOne(RowCursor cursor, ValueGetter<T> getSrc, InPredicate<T> hasBad)
                         : base(cursor, getSrc, hasBad)
                     {
                         _getter = GetValue;
@@ -373,7 +352,7 @@ namespace Microsoft.ML.Runtime.Data
                 {
                     private readonly ValueGetter<VBuffer<T>> _getter;
 
-                    public ValueVec(RowCursor cursor, ValueGetter<VBuffer<T>> getSrc, RefPredicate<VBuffer<T>> hasBad)
+                    public ValueVec(RowCursor cursor, ValueGetter<VBuffer<T>> getSrc, InPredicate<VBuffer<T>> hasBad)
                         : base(cursor, getSrc, hasBad)
                     {
                         _getter = GetValue;
@@ -396,7 +375,7 @@ namespace Microsoft.ML.Runtime.Data
             private readonly Value[] _values;
 
             public RowCursor(NAFilter parent, IRowCursor input, bool[] active)
-                : base(parent.Host, input, parent.Schema, active)
+                : base(parent.Host, input, parent.OutputSchema, active)
             {
                 _parent = parent;
                 _values = new Value[_parent._infos.Length];

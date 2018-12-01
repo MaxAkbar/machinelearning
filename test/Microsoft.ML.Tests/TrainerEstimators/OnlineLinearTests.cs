@@ -2,34 +2,42 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Core.Data;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.FactorizationMachine;
-using Microsoft.ML.Runtime.Learners;
+using Microsoft.ML.StaticPipe;
+using Microsoft.ML.Trainers.Online;
 using Xunit;
 
 namespace Microsoft.ML.Tests.TrainerEstimators
 {
     public partial class TrainerEstimators
     {
-        [Fact(Skip = "AP is now uncalibrated but advertises as calibrated")]
+        [Fact]
         public void OnlineLinearWorkout()
         {
             var dataPath = GetDataPath("breast-cancer.txt");
 
             var data = TextLoader.CreateReader(Env, ctx => (Label: ctx.LoadFloat(0), Features: ctx.LoadFloat(1, 10)))
-                .Read(new MultiFileSource(dataPath));
+                .Read(dataPath);
 
             var pipe = data.MakeNewEstimator()
                 .Append(r => (r.Label, Features: r.Features.Normalize()));
 
             var trainData = pipe.Fit(data).Transform(data).AsDynamic;
 
-            IEstimator<ITransformer> est = new OnlineGradientDescentTrainer(Env, new OnlineGradientDescentTrainer.Arguments());
-            TestEstimatorCore(est, trainData);
+            var ogdTrainer = new OnlineGradientDescentTrainer(Env, "Label", "Features");
+            TestEstimatorCore(ogdTrainer, trainData);
+            var ogdModel = ogdTrainer.Fit(trainData);
+            ogdTrainer.Train(trainData, ogdModel.Model);
 
-            est = new AveragedPerceptronTrainer(Env, new AveragedPerceptronTrainer.Arguments());
-            TestEstimatorCore(est, trainData);
+            var apTrainer = new AveragedPerceptronTrainer(Env, "Label", "Features", lossFunction: new HingeLoss(), advancedSettings: s =>
+            {
+                s.LearningRate = 0.5f;
+            });
+            TestEstimatorCore(apTrainer, trainData);
+
+            var apModel = apTrainer.Fit(trainData);
+            apTrainer.Train(trainData, apModel.Model);
 
             Done();
 

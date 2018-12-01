@@ -10,10 +10,11 @@ using Xunit;
 
 namespace Microsoft.ML.Tests.Scenarios.PipelineApi
 {
+#pragma warning disable 612, 618
     public partial class PipelineApiScenarioTests
     {
         /// <summary>
-        /// Meta-components: Meta-components (e.g., components that themselves instantiate components) should not be booby-trapped.
+        /// Meta-components: Meta-components (for example, components that themselves instantiate components) should not be booby-trapped.
         /// When specifying what trainer OVA should use, a user will be able to specify any binary classifier.
         /// If they specify a regression or multi-class classifier ideally that should be a compile error.
         /// </summary>
@@ -39,4 +40,5 @@ namespace Microsoft.ML.Tests.Scenarios.PipelineApi
             var prediction = model.Predict(new IrisData { PetalLength = 1, PetalWidth = 2, SepalLength = 1.4f, SepalWidth = 1.6f });
         }
     }
+#pragma warning restore 612, 618
 }

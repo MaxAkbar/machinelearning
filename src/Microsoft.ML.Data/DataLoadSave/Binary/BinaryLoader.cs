@@ -2,6 +2,15 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+using Microsoft.ML.Data;
+using Microsoft.ML.Runtime;
+using Microsoft.ML.Runtime.Command;
+using Microsoft.ML.Runtime.CommandLine;
+using Microsoft.ML.Runtime.Data;
+using Microsoft.ML.Runtime.Data.IO;
+using Microsoft.ML.Runtime.Internal.Utilities;
+using Microsoft.ML.Runtime.Model;
+using Microsoft.ML.Transforms;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -12,13 +21,6 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.Command;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Data.IO;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
 
 [assembly: LoadableClass(BinaryLoader.Summary, typeof(BinaryLoader), typeof(BinaryLoader.Arguments), typeof(SignatureDataLoader),
     "Binary Loader",
@@ -155,7 +157,7 @@ namespace Microsoft.ML.Runtime.Data.IO
                 ColumnIndex = index;
                 Name = name;
                 Codec = codec;
-                Type = Codec != null ? Codec.Type : null;
+                Type = Codec?.Type;
                 Compression = compression;
                 RowsPerBlock = rowsPerBlock;
                 LookupOffset = lookupOffset;
@@ -279,7 +281,7 @@ namespace Microsoft.ML.Runtime.Data.IO
             /// <summary>
             /// Fetches the maximum block sizes for both the compressed and decompressed
             /// block sizes, for this column. If there are no blocks associated with this
-            /// column, for whatever reason (e.g., a data view with no rows, or a generated
+            /// column, for whatever reason (for example, a data view with no rows, or a generated
             /// column), this will return 0 in both vlaues.
             /// </summary>
             /// <param name="compressed">The maximum value of the compressed block size
@@ -311,7 +313,6 @@ namespace Microsoft.ML.Runtime.Data.IO
                     using (var ch = _parent._host.Start("Metadata TOC Read"))
                     {
                         ReadTocMetadata(ch, stream);
-                        ch.Done();
                     }
                 }
             }
@@ -694,7 +695,7 @@ namespace Microsoft.ML.Runtime.Data.IO
         private readonly BinaryReader _reader;
         private readonly CodecFactory _factory;
         private readonly Header _header;
-        private readonly SchemaImpl _schema;
+        private readonly Schema _schema;
         private readonly bool _autodeterminedThreads;
         private readonly int _threads;
         private readonly string _generatedRowIndexName;
@@ -702,7 +703,7 @@ namespace Microsoft.ML.Runtime.Data.IO
 
         private readonly TableOfContentsEntry[] _aliveColumns;
         // We still want to be able to access information about the columns we could not read, like their
-        // name, where they are, how much space they're taking, etc. Conceivably for some operations (e.g.,
+        // name, where they are, how much space they're taking, etc. Conceivably for some operations (for example,
         // column filtering) whether or not we can interpret the values in the column is totally irrelevant.
         private readonly TableOfContentsEntry[] _deadColumns;
 
@@ -757,11 +758,11 @@ namespace Microsoft.ML.Runtime.Data.IO
         /// </summary>
         private const ulong ReaderFirstVersion = 0x0001000100010002;
 
-        public ISchema Schema { get { return _schema; } }
+        public Schema Schema { get { return _schema; } }
 
         private long RowCount { get { return _header.RowCount; } }
 
-        public long? GetRowCount(bool lazy = true) { return RowCount; }
+        public long? GetRowCount() { return RowCount; }
 
         public bool CanShuffle { get { return true; } }
 
@@ -805,14 +806,13 @@ namespace Microsoft.ML.Runtime.Data.IO
                 _threads = Math.Max(1, args.Threads ?? (Environment.ProcessorCount / 2));
                 _generatedRowIndexName = string.IsNullOrWhiteSpace(args.RowIndexName) ? null : args.RowIndexName;
                 InitToc(ch, out _aliveColumns, out _deadColumns, out _rowsPerBlock, out _tocEndLim);
-                _schema = new SchemaImpl(this);
-                _host.Assert(_schema.ColumnCount == Utils.Size(_aliveColumns));
+                _schema = Schema.Create(new SchemaImpl(this));
+                _host.Assert(_schema.Count == Utils.Size(_aliveColumns));
                 _bufferCollection = new MemoryStreamCollection();
                 if (Utils.Size(_deadColumns) > 0)
                     ch.Warning("BinaryLoader does not know how to interpret {0} columns", Utils.Size(_deadColumns));
                 _shuffleBlocks = args.PoolBlocks;
                 CalculateShufflePoolRows(ch, out _randomShufflePoolRows);
-                ch.Done();
             }
         }
 
@@ -822,7 +822,7 @@ namespace Microsoft.ML.Runtime.Data.IO
         /// <param name="stream">A seekable, readable stream. Note that the data view reader assumes
         /// that it is the exclusive owner of this stream.</param>
         /// <param name="args">Arguments</param>
-        /// <param name="env">Host enviroment</param>
+        /// <param name="env">Host environment</param>
         /// <param name="leaveOpen">Whether to leave the input stream open</param>
         public BinaryLoader(IHostEnvironment env, Arguments args, Stream stream, bool leaveOpen = true)
             : this(args, env.Register(LoadName), stream, leaveOpen)
@@ -895,14 +895,13 @@ namespace Microsoft.ML.Runtime.Data.IO
 
                 _header = InitHeader();
                 InitToc(ch, out _aliveColumns, out _deadColumns, out _rowsPerBlock, out _tocEndLim);
-                _schema = new SchemaImpl(this);
-                ch.Assert(_schema.ColumnCount == Utils.Size(_aliveColumns));
+                _schema = Schema.Create(new SchemaImpl(this));
+                ch.Assert(_schema.Count == Utils.Size(_aliveColumns));
                 _bufferCollection = new MemoryStreamCollection();
                 if (Utils.Size(_deadColumns) > 0)
                     ch.Warning("BinaryLoader does not know how to interpret {0} columns", Utils.Size(_deadColumns));
 
                 CalculateShufflePoolRows(ch, out _randomShufflePoolRows);
-                ch.Done();
             }
         }
 
@@ -1001,7 +1000,7 @@ namespace Microsoft.ML.Runtime.Data.IO
         /// Save a zero-row dataview that will be used to infer schema information, used in the case
         /// where the binary loader is instantiated with no input streams.
         /// </summary>
-        private static void SaveSchema(IHostEnvironment env, ModelSaveContext ctx, ISchema schema, out int[] unsavableColIndices)
+        private static void SaveSchema(IHostEnvironment env, ModelSaveContext ctx, Schema schema, out int[] unsavableColIndices)
         {
             Contracts.AssertValue(env, "env");
             var h = env.Register(LoadName);
@@ -1016,7 +1015,7 @@ namespace Microsoft.ML.Runtime.Data.IO
             saverArgs.Silent = true;
             var saver = new BinarySaver(env, saverArgs);
 
-            var cols = Enumerable.Range(0, schema.ColumnCount)
+            var cols = Enumerable.Range(0, schema.Count)
                 .Select(x => new { col = x, isSavable = saver.IsColumnSavable(schema.GetColumnType(x)) });
             int[] toSave = cols.Where(x => x.isSavable).Select(x => x.col).ToArray();
             unsavableColIndices = cols.Where(x => !x.isSavable).Select(x => x.col).ToArray();
@@ -1033,7 +1032,7 @@ namespace Microsoft.ML.Runtime.Data.IO
         /// to begin the pipe with, with the assumption that the user will bypass the loader at deserialization
         /// time by providing a starting data view.
         /// </summary>
-        public static void SaveInstance(IHostEnvironment env, ModelSaveContext ctx, ISchema schema)
+        public static void SaveInstance(IHostEnvironment env, ModelSaveContext ctx, Schema schema)
         {
             Contracts.CheckValue(env, nameof(env));
             var h = env.Register(LoadName);
@@ -1194,7 +1193,7 @@ namespace Microsoft.ML.Runtime.Data.IO
 
         private void CalculateShufflePoolRows(IChannel ch, out int poolRows)
         {
-            if (!ShuffleTransform.CanShuffleAll(Schema))
+            if (!RowShufflingTransformer.CanShuffleAll(Schema))
             {
                 // This will only happen if we expand the set of types we can serialize,
                 // without expanding the set of types we can cache. That is entirely
@@ -1230,12 +1229,12 @@ namespace Microsoft.ML.Runtime.Data.IO
             int count = _header.RowCount <= int.MaxValue ? (int)_header.RowCount : 0;
             KeyType type = new KeyType(DataKind.U8, 0, count);
             // We are mapping the row index as expressed as a long, into a key value, so we must increment by one.
-            ValueMapper<long, ulong> mapper = (ref long src, ref ulong dst) => dst = (ulong)(src + 1);
+            ValueMapper<long, ulong> mapper = (in long src, ref ulong dst) => dst = (ulong)(src + 1);
             var entry = new TableOfContentsEntry(this, rowIndexName, type, mapper);
             return entry;
         }
 
-        private IRowCursor GetRowCursorCore(Func<int, bool> predicate, IRandom rand = null)
+        private IRowCursor GetRowCursorCore(Func<int, bool> predicate, Random rand = null)
         {
             if (rand != null && _randomShufflePoolRows > 0)
             {
@@ -1243,12 +1242,12 @@ namespace Microsoft.ML.Runtime.Data.IO
                 // the entire dataset in memory anyway.
                 var ourRand = _randomShufflePoolRows == _header.RowCount ? null : rand;
                 var cursor = new Cursor(this, predicate, ourRand);
-                return ShuffleTransform.GetShuffledCursor(_host, _randomShufflePoolRows, cursor, rand);
+                return RowShufflingTransformer.GetShuffledCursor(_host, _randomShufflePoolRows, cursor, rand);
             }
             return new Cursor(this, predicate, rand);
         }
 
-        public IRowCursor GetRowCursor(Func<int, bool> predicate, IRandom rand = null)
+        public IRowCursor GetRowCursor(Func<int, bool> predicate, Random rand = null)
         {
             _host.CheckValue(predicate, nameof(predicate));
             _host.CheckValueOrNull(rand);
@@ -1256,7 +1255,7 @@ namespace Microsoft.ML.Runtime.Data.IO
         }
 
         public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator,
-            Func<int, bool> predicate, int n, IRandom rand = null)
+            Func<int, bool> predicate, int n, Random rand = null)
         {
             _host.CheckValue(predicate, nameof(predicate));
             _host.CheckValueOrNull(rand);
@@ -1286,7 +1285,7 @@ namespace Microsoft.ML.Runtime.Data.IO
 
             private volatile bool _disposed;
 
-            public ISchema Schema { get { return _parent.Schema; } }
+            public Schema Schema => _parent.Schema;
 
             public override long Batch
             {
@@ -1294,14 +1293,13 @@ namespace Microsoft.ML.Runtime.Data.IO
                 get { return 0; }
             }
 
-            public Cursor(BinaryLoader parent, Func<int, bool> predicate, IRandom rand)
+            public Cursor(BinaryLoader parent, Func<int, bool> predicate, Random rand)
                 : base(parent._host)
             {
                 _parent = parent;
                 Ch.AssertValue(predicate);
                 Ch.AssertValueOrNull(rand);
 
-                SchemaImpl schema = _parent._schema;
                 _exMarshaller = new ExceptionMarshaller();
 
                 TableOfContentsEntry[] toc = _parent._aliveColumns;
@@ -1595,7 +1593,7 @@ namespace Microsoft.ML.Runtime.Data.IO
                     }
 
                     /// <summary>
-                    /// Constructor for a sentinel compressed block. (E.g.,
+                    /// Constructor for a sentinel compressed block. (For example,
                     /// the pipe's last block, which contains no valid data.)
                     /// </summary>
                     public Block(long blockSequence)
@@ -1713,7 +1711,7 @@ namespace Microsoft.ML.Runtime.Data.IO
                 {
                     Ectx.Check(_curr != null, _badCursorState);
                     long src = _curr.RowIndexLim - _remaining - 1;
-                    _mapper(ref src, ref value);
+                    _mapper(in src, ref value);
                 }
 
                 public override Delegate GetGetter()
@@ -1782,7 +1780,7 @@ namespace Microsoft.ML.Runtime.Data.IO
                     }
 
                     /// <summary>
-                    /// Constructor for a sentinel compressed block. (E.g.,
+                    /// Constructor for a sentinel compressed block. (For example,
                     /// the pipe's last block, which contains no valid data.)
                     /// </summary>
                     public CompressedBlock(long blockSequence)
@@ -2140,7 +2138,7 @@ namespace Microsoft.ML.Runtime.Data.IO
             }
         }
 
-        public sealed class InfoCommand : ICommand
+        internal sealed class InfoCommand : ICommand
         {
             public const string LoadName = "IdvInfo";
 
@@ -2183,7 +2181,6 @@ namespace Microsoft.ML.Runtime.Data.IO
                 using (var ch = host.Start("Inspection"))
                 {
                     RunCore(ch, loader);
-                    ch.Done();
                 }
             }
 

@@ -9,7 +9,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
-using Microsoft.ML;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Internal.Utilities;
@@ -513,7 +512,7 @@ namespace Microsoft.ML.Runtime.Sweeper
         /// Generic parameter parser. Currently hand-hacked to auto-detect type.
         ///
         /// Generic form:   Name:Values
-        /// e.g.:    lr:0.05-0.4
+        /// for example,    lr:0.05-0.4
         ///          lambda:0.1-1000@log10
         ///          nl:2-64@log2
         ///          norm:-,+

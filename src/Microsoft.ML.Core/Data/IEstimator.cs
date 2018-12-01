@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Data;
 using System;
@@ -120,7 +121,16 @@ namespace Microsoft.ML.Core.Data
             Contracts.CheckParam(columns.All(c => c != null), nameof(columns), "No items should be null.");
         }
 
-        private static void GetColumnArgs(ColumnType type,
+        /// <summary>
+        /// Given a <paramref name="type"/>, extract the type parameters that describe this type
+        /// as a <see cref="SchemaShape"/>'s column type.
+        /// </summary>
+        /// <param name="type">The actual column type to process.</param>
+        /// <param name="vecKind">The vector kind of <paramref name="type"/>.</param>
+        /// <param name="itemType">The item type of <paramref name="type"/>.</param>
+        /// <param name="isKey">Whether <paramref name="type"/> (or its item type) is a key.</param>
+        [BestFriend]
+        internal static void GetColumnTypeShape(ColumnType type,
             out Column.VectorKind vecKind,
             out ColumnType itemType,
             out bool isKey)
@@ -141,12 +151,12 @@ namespace Microsoft.ML.Core.Data
         /// <summary>
         /// Create a schema shape out of the fully defined schema.
         /// </summary>
-        public static SchemaShape Create(ISchema schema)
+        public static SchemaShape Create(Schema schema)
         {
             Contracts.CheckValue(schema, nameof(schema));
             var cols = new List<Column>();
 
-            for (int iCol = 0; iCol < schema.ColumnCount; iCol++)
+            for (int iCol = 0; iCol < schema.Count; iCol++)
             {
                 if (!schema.IsHidden(iCol))
                 {
@@ -154,12 +164,12 @@ namespace Microsoft.ML.Core.Data
                     var mCols = new List<Column>();
                     foreach (var metaNameType in schema.GetMetadataTypes(iCol))
                     {
-                        GetColumnArgs(metaNameType.Value, out var mVecKind, out var mItemType, out var mIsKey);
+                        GetColumnTypeShape(metaNameType.Value, out var mVecKind, out var mItemType, out var mIsKey);
                         mCols.Add(new Column(metaNameType.Key, mVecKind, mItemType, mIsKey));
                     }
                     var metadata = mCols.Count > 0 ? new SchemaShape(mCols) : _empty;
                     // Next create the single column.
-                    GetColumnArgs(schema.GetColumnType(iCol), out var vecKind, out var itemType, out var isKey);
+                    GetColumnTypeShape(schema.GetColumnType(iCol), out var vecKind, out var itemType, out var isKey);
                     cols.Add(new Column(schema.GetColumnName(iCol), vecKind, itemType, isKey, metadata));
                 }
             }
@@ -203,7 +213,7 @@ namespace Microsoft.ML.Core.Data
         /// <summary>
         /// The output schema of the reader.
         /// </summary>
-        ISchema GetOutputSchema();
+        Schema GetOutputSchema();
     }
 
     /// <summary>
@@ -238,7 +248,7 @@ namespace Microsoft.ML.Core.Data
         /// Returns the output schema of the data, if the input schema is like the one provided.
         /// Throws <see cref="SchemaException"/> if the input schema is not valid for the transformer.
         /// </summary>
-        ISchema GetOutputSchema(ISchema inputSchema);
+        Schema GetOutputSchema(Schema inputSchema);
 
         /// <summary>
         /// Take the data in, make transformations, output the data.
@@ -247,7 +257,7 @@ namespace Microsoft.ML.Core.Data
         IDataView Transform(IDataView input);
 
         /// <summary>
-        /// Whether a call to <see cref="GetRowToRowMapper(ISchema)"/> should succeed, on an
+        /// Whether a call to <see cref="GetRowToRowMapper(Schema)"/> should succeed, on an
         /// appropriate schema.
         /// </summary>
         bool IsRowToRowMapper { get; }
@@ -259,7 +269,7 @@ namespace Microsoft.ML.Core.Data
         /// </summary>
         /// <param name="inputSchema">The input schema for which we should get the mapper.</param>
         /// <returns>The row to row mapper.</returns>
-        IRowToRowMapper GetRowToRowMapper(ISchema inputSchema);
+        IRowToRowMapper GetRowToRowMapper(Schema inputSchema);
     }
 
     /// <summary>

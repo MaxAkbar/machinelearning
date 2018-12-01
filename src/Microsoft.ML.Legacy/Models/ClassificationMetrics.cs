@@ -5,6 +5,7 @@
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Api;
 using Microsoft.ML.Runtime.Data;
+using System;
 using System.Collections.Generic;
 using static Microsoft.ML.Runtime.Data.MetricKinds;
 
@@ -13,6 +14,7 @@ namespace Microsoft.ML.Legacy.Models
     /// <summary>
     /// This class contains the overall metrics computed by multi-class classification evaluators.
     /// </summary>
+    [Obsolete]
     public sealed class ClassificationMetrics
     {
         private ClassificationMetrics()
@@ -105,7 +107,7 @@ namespace Microsoft.ML.Legacy.Models
         /// The log-loss reduction is scaled relative to a classifier that predicts the prior for every example:
         /// (LL(prior) - LL(classifier)) / LL(prior)
         /// This metric can be interpreted as the advantage of the classifier over a random prediction.
-        /// E.g., if the RIG equals 20, it can be interpreted as "the probability of a correct prediction is
+        /// For example, if the RIG equals 20, it can be interpreted as "the probability of a correct prediction is
         /// 20% better than random guessing".
         /// </remarks>
         public double LogLossReduction { get; private set; }

@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime.Internal.Utilities;
 using Microsoft.ML.Runtime.Model;
 using Microsoft.ML.Runtime.Model.Onnx;
@@ -44,13 +45,22 @@ namespace Microsoft.ML.Runtime.Data
 
         public abstract void Save(ModelSaveContext ctx);
 
-        public abstract long? GetRowCount(bool lazy = true);
+        public abstract long? GetRowCount();
 
         public virtual bool CanShuffle { get { return Source.CanShuffle; } }
 
-        public abstract ISchema Schema { get; }
+        /// <summary>
+        /// The field is the type information of the produced IDataView of this transformer.
+        ///
+        /// Explicit interface implementation hides <see cref="IDataView.Schema"/> in all derived classes. The reason
+        /// is that a transformer should know the type it will produce but shouldn't contain the type of the data it produces.
+        /// Thus, this field will be eventually removed while legacy code can still access <see cref="IDataView.Schema"/> for now.
+        /// </summary>
+        Schema IDataView.Schema => OutputSchema;
 
-        public IRowCursor GetRowCursor(Func<int, bool> predicate, IRandom rand = null)
+        public abstract Schema OutputSchema { get; }
+
+        public IRowCursor GetRowCursor(Func<int, bool> predicate, Random rand = null)
         {
             Host.CheckValue(predicate, nameof(predicate));
             Host.CheckValueOrNull(rand);
@@ -83,10 +93,10 @@ namespace Microsoft.ML.Runtime.Data
         /// <summary>
         /// Create a single (non-parallel) row cursor.
         /// </summary>
-        protected abstract IRowCursor GetRowCursorCore(Func<int, bool> predicate, IRandom rand = null);
+        protected abstract IRowCursor GetRowCursorCore(Func<int, bool> predicate, Random rand = null);
 
         public abstract IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator,
-            Func<int, bool> predicate, int n, IRandom rand = null);
+            Func<int, bool> predicate, int n, Random rand = null);
     }
 
     /// <summary>
@@ -104,7 +114,7 @@ namespace Microsoft.ML.Runtime.Data
         {
         }
 
-        public sealed override long? GetRowCount(bool lazy = true) { return Source.GetRowCount(lazy); }
+        public sealed override long? GetRowCount() { return Source.GetRowCount(); }
     }
 
     /// <summary>
@@ -112,23 +122,25 @@ namespace Microsoft.ML.Runtime.Data
     /// </summary>
     public abstract class FilterBase : TransformBase, ITransformCanSavePfa
     {
-        protected FilterBase(IHostEnvironment env, string name, IDataView input)
+        [BestFriend]
+        private protected FilterBase(IHostEnvironment env, string name, IDataView input)
             : base(env, name, input)
         {
         }
 
-        protected FilterBase(IHost host, IDataView input)
+        [BestFriend]
+        private protected FilterBase(IHost host, IDataView input)
             : base(host, input)
         {
         }
 
-        public override long? GetRowCount(bool lazy = true) { return null; }
+        public override long? GetRowCount() => null;
 
-        public sealed override ISchema Schema { get { return Source.Schema; } }
+        public override Schema OutputSchema => Source.Schema;
 
-        public virtual bool CanSavePfa => true;
+        bool ICanSavePfa.CanSavePfa => true;
 
-        public virtual void SaveAsPfa(BoundPfaContext ctx)
+        void ISaveAsPfa.SaveAsPfa(BoundPfaContext ctx)
         {
             Host.CheckValue(ctx, nameof(ctx));
             // Because filters do not modify the schema, this is a no-op.
@@ -154,7 +166,7 @@ namespace Microsoft.ML.Runtime.Data
 
         protected abstract Func<int, bool> GetDependenciesCore(Func<int, bool> predicate);
 
-        ISchema IRowToRowMapper.InputSchema => Source.Schema;
+        public Schema InputSchema => Source.Schema;
 
         public IRow GetRow(IRow input, Func<int, bool> active, out Action disposer)
         {
@@ -168,8 +180,7 @@ namespace Microsoft.ML.Runtime.Data
                 Action disp;
                 var getters = CreateGetters(input, active, out disp);
                 disposer += disp;
-                ch.Done();
-                return new Row(input, this, Schema, getters);
+                return new Row(input, this, OutputSchema, getters);
             }
         }
 
@@ -179,7 +190,7 @@ namespace Microsoft.ML.Runtime.Data
 
         private sealed class Row : IRow
         {
-            private readonly ISchema _schema;
+            private readonly Schema _schema;
             private readonly IRow _input;
             private readonly Delegate[] _getters;
 
@@ -189,9 +200,9 @@ namespace Microsoft.ML.Runtime.Data
 
             public long Position { get { return _input.Position; } }
 
-            public ISchema Schema { get { return _schema; } }
+            public Schema Schema { get { return _schema; } }
 
-            public Row(IRow input, RowToRowMapperTransformBase parent, ISchema schema, Delegate[] getters)
+            public Row(IRow input, RowToRowMapperTransformBase parent, Schema schema, Delegate[] getters)
             {
                 _input = input;
                 _parent = parent;
@@ -469,11 +480,16 @@ namespace Microsoft.ML.Runtime.Data
         // The InputTranspose transpose schema, null iff InputTranspose is null.
         protected ITransposeSchema InputTransposeSchema => InputTranspose?.TransposeSchema;
 
-        public virtual bool CanSavePfa => false;
+        bool ICanSavePfa.CanSavePfa => CanSavePfaCore;
 
-        public virtual bool CanSaveOnnx => false;
+        private protected virtual bool CanSavePfaCore => false;
 
-        protected OneToOneTransformBase(IHostEnvironment env, string name, OneToOneColumn[] column,
+        bool ICanSaveOnnx.CanSaveOnnx(OnnxContext ctx) => CanSaveOnnxCore;
+
+        private protected virtual bool CanSaveOnnxCore => false;
+
+        [BestFriend]
+        private protected OneToOneTransformBase(IHostEnvironment env, string name, OneToOneColumn[] column,
             IDataView input, Func<ColumnType, string> testType)
             : base(env, name, input)
         {
@@ -486,7 +502,8 @@ namespace Microsoft.ML.Runtime.Data
             Metadata = new MetadataDispatcher(Infos.Length);
         }
 
-        protected OneToOneTransformBase(IHost host, OneToOneColumn[] column,
+        [BestFriend]
+        private protected OneToOneTransformBase(IHost host, OneToOneColumn[] column,
             IDataView input, Func<ColumnType, string> testType)
             : base(host, input)
         {
@@ -499,7 +516,8 @@ namespace Microsoft.ML.Runtime.Data
             Metadata = new MetadataDispatcher(Infos.Length);
         }
 
-        protected OneToOneTransformBase(IHost host, ModelLoadContext ctx,
+        [BestFriend]
+        private protected OneToOneTransformBase(IHost host, ModelLoadContext ctx,
             IDataView input, Func<ColumnType, string> testType)
             : base(host, input)
         {
@@ -515,7 +533,8 @@ namespace Microsoft.ML.Runtime.Data
         /// <summary>
         /// Re-applying constructor.
         /// </summary>
-        protected OneToOneTransformBase(IHostEnvironment env, string name, OneToOneTransformBase transform,
+        [BestFriend]
+        private protected OneToOneTransformBase(IHostEnvironment env, string name, OneToOneTransformBase transform,
             IDataView newInput, Func<ColumnType, string> checkType)
             : base(env, name, newInput)
         {
@@ -526,7 +545,7 @@ namespace Microsoft.ML.Runtime.Data
                 .Select(x => new ColumnTmp
                 {
                     Name = x.Name,
-                    Source = transform.Source.Schema.GetColumnName(x.Source),
+                    Source = transform.Source.Schema[x.Source].Name,
                 })
                 .ToArray();
 
@@ -535,18 +554,20 @@ namespace Microsoft.ML.Runtime.Data
             Metadata = new MetadataDispatcher(Infos.Length);
         }
 
-        protected MetadataDispatcher Metadata { get; }
+        [BestFriend]
+        private protected MetadataDispatcher Metadata { get; }
 
-        protected void SaveBase(ModelSaveContext ctx)
+        [BestFriend]
+        private protected void SaveBase(ModelSaveContext ctx)
         {
             Host.CheckValue(ctx, nameof(ctx));
             _bindings.Save(ctx);
         }
 
-        public void SaveAsPfa(BoundPfaContext ctx)
+        void ISaveAsPfa.SaveAsPfa(BoundPfaContext ctx)
         {
             Host.CheckValue(ctx, nameof(ctx));
-            Host.Assert(CanSavePfa);
+            Host.Assert(((ICanSavePfa)this).CanSavePfa);
 
             var toHide = new List<string>();
             var toDeclare = new List<KeyValuePair<string, JToken>>();
@@ -554,7 +575,7 @@ namespace Microsoft.ML.Runtime.Data
             for (int iinfo = 0; iinfo < Infos.Length; ++iinfo)
             {
                 var info = Infos[iinfo];
-                var srcName = Source.Schema.GetColumnName(info.Source);
+                var srcName = Source.Schema[info.Source].Name;
                 string srcToken = ctx.TokenOrNullForName(srcName);
                 if (srcToken == null)
                 {
@@ -573,15 +594,15 @@ namespace Microsoft.ML.Runtime.Data
             ctx.DeclareVar(toDeclare.ToArray());
         }
 
-        public void SaveAsOnnx(OnnxContext ctx)
+        void ISaveAsOnnx.SaveAsOnnx(OnnxContext ctx)
         {
             Host.CheckValue(ctx, nameof(ctx));
-            Host.Assert(CanSaveOnnx);
+            Host.Assert(((ICanSaveOnnx)this).CanSaveOnnx(ctx));
 
             for (int iinfo = 0; iinfo < Infos.Length; ++iinfo)
             {
                 ColInfo info = Infos[iinfo];
-                string sourceColumnName = Source.Schema.GetColumnName(info.Source);
+                string sourceColumnName = Source.Schema[info.Source].Name;
                 if (!ctx.ContainsColumn(sourceColumnName))
                 {
                     ctx.RemoveColumn(info.Name, false);
@@ -589,7 +610,7 @@ namespace Microsoft.ML.Runtime.Data
                 }
 
                 if (!SaveAsOnnxCore(ctx, iinfo, info, ctx.GetVariableName(sourceColumnName),
-                    ctx.AddIntermediateVariable(Schema.GetColumnType(_bindings.MapIinfoToCol(iinfo)), info.Name)))
+                    ctx.AddIntermediateVariable(OutputSchema[_bindings.MapIinfoToCol(iinfo)].Type, info.Name)))
                 {
                     ctx.RemoveColumn(info.Name, true);
                 }
@@ -597,8 +618,8 @@ namespace Microsoft.ML.Runtime.Data
         }
 
         /// <summary>
-        /// Called by <see cref="SaveAsPfa"/>. Should be implemented by subclasses that return
-        /// <c>true</c> from <see cref="CanSavePfa"/>. Will be called
+        /// Called by <see cref="ISaveAsPfa.SaveAsPfa"/>. Should be implemented by subclasses that return
+        /// <c>true</c> from <see cref="ICanSavePfa.CanSavePfa"/>. Will be called
         /// </summary>
         /// <param name="ctx">The context. Can be used to declare cells, access other information,
         /// and whatnot. This method should not actually, however, declare the variable corresponding
@@ -608,20 +629,22 @@ namespace Microsoft.ML.Runtime.Data
         /// <param name="srcToken">The token in the PFA corresponding to the source col</param>
         /// <returns>Shuold return the declaration corresponding to the value of this column. Will
         /// return <c>null</c> in the event that we do not know how to express this column as PFA</returns>
-        protected virtual JToken SaveAsPfaCore(BoundPfaContext ctx, int iinfo, ColInfo info, JToken srcToken)
+        [BestFriend]
+        private protected virtual JToken SaveAsPfaCore(BoundPfaContext ctx, int iinfo, ColInfo info, JToken srcToken)
         {
             Host.AssertValue(ctx);
             Host.Assert(0 <= iinfo && iinfo < _bindings.InfoCount);
             Host.Assert(Infos[iinfo] == info);
             Host.AssertValue(srcToken);
-            Host.Assert(CanSavePfa);
+            Host.Assert(((ICanSavePfa)this).CanSavePfa);
             return null;
         }
 
-        protected virtual bool SaveAsOnnxCore(OnnxContext ctx, int iinfo, ColInfo info, string srcVariableName,
+        [BestFriend]
+        private protected virtual bool SaveAsOnnxCore(OnnxContext ctx, int iinfo, ColInfo info, string srcVariableName,
             string dstVariableName) => false;
 
-        public sealed override ISchema Schema => _bindings;
+        public sealed override Schema OutputSchema => _bindings.AsSchema;
 
         public ITransposeSchema TransposeSchema => _bindings;
 
@@ -704,7 +727,7 @@ namespace Microsoft.ML.Runtime.Data
             return _bindings.AnyNewColumnsActive(predicate);
         }
 
-        protected override IRowCursor GetRowCursorCore(Func<int, bool> predicate, IRandom rand = null)
+        protected override IRowCursor GetRowCursorCore(Func<int, bool> predicate, Random rand = null)
         {
             Host.AssertValue(predicate, "predicate");
             Host.AssertValueOrNull(rand);
@@ -716,7 +739,7 @@ namespace Microsoft.ML.Runtime.Data
         }
 
         public sealed override IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator,
-            Func<int, bool> predicate, int n, IRandom rand = null)
+            Func<int, bool> predicate, int n, Random rand = null)
         {
             Host.CheckValue(predicate, nameof(predicate));
             Host.CheckValueOrNull(rand);
@@ -744,7 +767,7 @@ namespace Microsoft.ML.Runtime.Data
         {
             Host.Assert(0 <= col && col < _bindings.ColumnCount);
             return Host.ExceptParam(nameof(col), "Bad call to GetSlotCursor on untransposable column '{0}'",
-                Schema.GetColumnName(col));
+                OutputSchema[col].Name);
         }
 
         public ISlotCursor GetSlotCursor(int col)
@@ -809,7 +832,6 @@ namespace Microsoft.ML.Runtime.Data
                     getters[iinfo] = GetGetterCore(ch, input, iinfo, out disp);
                     disposer += disp;
                 }
-                ch.Done();
                 return getters;
             }
         }
@@ -858,7 +880,7 @@ namespace Microsoft.ML.Runtime.Data
                 base.Dispose();
             }
 
-            public ISchema Schema { get { return _bindings; } }
+            public Schema Schema => _bindings.AsSchema;
 
             public ValueGetter<TValue> GetGetter<TValue>(int col)
             {

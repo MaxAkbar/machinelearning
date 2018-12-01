@@ -2,12 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.HalLearners;
-using Microsoft.ML.Runtime.Learners;
-using Microsoft.ML.Runtime.RunTests;
+using Microsoft.ML.Trainers.HalLearners;
 using Xunit;
 
 namespace Microsoft.ML.Tests.TrainerEstimators
@@ -18,8 +13,11 @@ namespace Microsoft.ML.Tests.TrainerEstimators
         public void TestEstimatorOlsLinearRegression()
         {
             var dataView = GetRegressionPipeline();
-            var pipe = new OlsLinearRegressionTrainer(Env, "Features", "Label");
-            TestEstimatorCore(pipe, dataView);
+            var trainer = new OlsLinearRegressionTrainer(Env, "Label", "Features");
+            TestEstimatorCore(trainer, dataView);
+
+            var model = trainer.Fit(dataView);
+            trainer.Train(dataView, model.Model);
             Done();
         }
     }

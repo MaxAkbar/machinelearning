@@ -12,6 +12,7 @@ set BUILD_TOOLS_PATH=%PACKAGES_DIR%\Microsoft.DotNet.BuildTools\%BUILDTOOLS_VERS
 set INIT_TOOLS_RESTORE_PROJECT=%~dp0init-tools.msbuild
 set BUILD_TOOLS_SEMAPHORE_DIR=%TOOLRUNTIME_DIR%\%BUILDTOOLS_VERSION%
 set BUILD_TOOLS_SEMAPHORE=%BUILD_TOOLS_SEMAPHORE_DIR%\init-tools.completed
+set ARCH=x64
 
 :: if force option is specified then clean the tool runtime and build tools package directory to force it to get recreated
 if [%1]==[force] (
@@ -45,11 +46,21 @@ if exist "%DotNetBuildToolsDir%" (
 echo Running %0 > "%INIT_TOOLS_LOG%"
 
 set /p DOTNET_VERSION=< "%~dp0DotnetCLIVersion.txt"
+
+:Arg_Loop
+if [%1] == [] goto :ArchSet
+if /i [%1] == [x86]         ( set ARCH=x86)
+if /i [%1] == [-Debug-Intrinsics] ( set /p DOTNET_VERSION=< "%~dp0DotnetCLIVersion.netcoreapp.latest.txt")
+if /i [%1] == [-Release-Intrinsics] ( set /p DOTNET_VERSION=< "%~dp0DotnetCLIVersion.netcoreapp.latest.txt")
+shift
+goto :Arg_Loop
+
+:ArchSet
 if exist "%DOTNET_CMD%" goto :afterdotnetrestore
 
 echo Installing dotnet cli...
 if NOT exist "%DOTNET_PATH%" mkdir "%DOTNET_PATH%"
-set DOTNET_ZIP_NAME=dotnet-sdk-%DOTNET_VERSION%-win-x64.zip
+set DOTNET_ZIP_NAME=dotnet-sdk-%DOTNET_VERSION%-win-%ARCH%.zip
 set DOTNET_REMOTE_PATH=https://dotnetcli.azureedge.net/dotnet/Sdk/%DOTNET_VERSION%/%DOTNET_ZIP_NAME%
 set DOTNET_LOCAL_PATH=%DOTNET_PATH%%DOTNET_ZIP_NAME%
 echo Installing '%DOTNET_REMOTE_PATH%' to '%DOTNET_LOCAL_PATH%' >> "%INIT_TOOLS_LOG%"

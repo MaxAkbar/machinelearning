@@ -5,10 +5,11 @@
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Ensemble;
-using Microsoft.ML.Runtime.FastTree;
-using Microsoft.ML.Runtime.KMeans;
 using Microsoft.ML.Runtime.Learners;
-using Microsoft.ML.Runtime.PCA;
+using Microsoft.ML.Trainers.FastTree;
+using Microsoft.ML.Trainers.KMeans;
+using Microsoft.ML.Trainers.PCA;
+using Microsoft.ML.Transforms.Categorical;
 
 namespace Microsoft.ML.TestFramework
 {
@@ -19,12 +20,14 @@ namespace Microsoft.ML.TestFramework
         {
             env.ComponentCatalog.RegisterAssembly(typeof(TextLoader).Assembly); // ML.Data
             env.ComponentCatalog.RegisterAssembly(typeof(LinearPredictor).Assembly); // ML.StandardLearners
-            env.ComponentCatalog.RegisterAssembly(typeof(CategoricalTransform).Assembly); // ML.Transforms
+            env.ComponentCatalog.RegisterAssembly(typeof(OneHotEncodingTransformer).Assembly); // ML.Transforms
             env.ComponentCatalog.RegisterAssembly(typeof(FastTreeBinaryPredictor).Assembly); // ML.FastTree
             env.ComponentCatalog.RegisterAssembly(typeof(EnsemblePredictor).Assembly); // ML.Ensemble
             env.ComponentCatalog.RegisterAssembly(typeof(KMeansPredictor).Assembly); // ML.KMeansClustering
             env.ComponentCatalog.RegisterAssembly(typeof(PcaPredictor).Assembly); // ML.PCA
+#pragma warning disable 612
             env.ComponentCatalog.RegisterAssembly(typeof(Experiment).Assembly); // ML.Legacy
+#pragma warning restore 612
             return env;
         }
     }

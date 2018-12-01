@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Internal.Utilities;
 
@@ -33,13 +34,13 @@ namespace Microsoft.ML.Runtime.Data
 
         private readonly IDataView[] _sources;
         private readonly int[] _counts;
-        private readonly ISchema _schema;
+        private readonly Schema _schema;
         private readonly IHost _host;
         private readonly bool _canShuffle;
 
         public bool CanShuffle { get { return _canShuffle; } }
 
-        public ISchema Schema { get { return _schema; } }
+        public Schema Schema { get { return _schema; } }
 
         // REVIEW: AppendRowsDataView now only checks schema consistency up to column names and types.
         // A future task will be to ensure that the sources are consistent on the metadata level.
@@ -54,7 +55,7 @@ namespace Microsoft.ML.Runtime.Data
         /// <param name="schema">The schema for the result. If this is null, the first source's schema will be used.</param>
         /// <param name="sources">The sources to be appended.</param>
         /// <returns>The resulting IDataView.</returns>
-        public static IDataView Create(IHostEnvironment env, ISchema schema, params IDataView[] sources)
+        public static IDataView Create(IHostEnvironment env, Schema schema, params IDataView[] sources)
         {
             Contracts.CheckValue(env, nameof(env));
             env.CheckValue(sources, nameof(sources));
@@ -66,7 +67,7 @@ namespace Microsoft.ML.Runtime.Data
             return new AppendRowsDataView(env, schema, sources);
         }
 
-        private AppendRowsDataView(IHostEnvironment env, ISchema schema, IDataView[] sources)
+        private AppendRowsDataView(IHostEnvironment env, Schema schema, IDataView[] sources)
         {
             Contracts.CheckValue(env, nameof(env));
             _host = env.Register(RegistrationName);
@@ -91,7 +92,7 @@ namespace Microsoft.ML.Runtime.Data
                     _counts = null;
                     break;
                 }
-                long? count = dv.GetRowCount(true);
+                long? count = dv.GetRowCount();
                 if (count == null || count < 0 || count > int.MaxValue)
                 {
                     _canShuffle = false;
@@ -115,8 +116,9 @@ namespace Microsoft.ML.Runtime.Data
 
             for (int c = 0; c < colCount; c++)
             {
-                string name = _schema.GetColumnName(c);
-                ColumnType type = _schema.GetColumnType(c);
+                string name = _schema[c].Name;
+                ColumnType type = _schema[c].Type;
+
                 for (int i = startingSchemaIndex; i < _sources.Length; i++)
                 {
                     ISchema schema = _sources[i].Schema;
@@ -126,12 +128,12 @@ namespace Microsoft.ML.Runtime.Data
             }
         }
 
-        public long? GetRowCount(bool lazy = true)
+        public long? GetRowCount()
         {
             long sum = 0;
             foreach (var source in _sources)
             {
-                var cur = source.GetRowCount(lazy);
+                var cur = source.GetRowCount();
                 if (cur == null)
                     return null;
                 _host.Check(cur.Value >= 0, "One of the sources returned a negative row count");
@@ -144,7 +146,7 @@ namespace Microsoft.ML.Runtime.Data
             return sum;
         }
 
-        public IRowCursor GetRowCursor(Func<int, bool> needCol, IRandom rand = null)
+        public IRowCursor GetRowCursor(Func<int, bool> needCol, Random rand = null)
         {
             _host.CheckValue(needCol, nameof(needCol));
             if (rand == null || !_canShuffle)
@@ -152,7 +154,7 @@ namespace Microsoft.ML.Runtime.Data
             return new RandCursor(this, needCol, rand, _counts);
         }
 
-        public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> predicate, int n, IRandom rand = null)
+        public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> predicate, int n, Random rand = null)
         {
             consolidator = null;
             return new IRowCursor[] { GetRowCursor(predicate, rand) };
@@ -165,7 +167,7 @@ namespace Microsoft.ML.Runtime.Data
 
             public override long Batch => 0;
 
-            public ISchema Schema { get; }
+            public Schema Schema { get; }
 
             public CursorBase(AppendRowsDataView parent)
                 : base(parent._host)
@@ -178,7 +180,7 @@ namespace Microsoft.ML.Runtime.Data
 
             protected Delegate CreateGetter(int col)
             {
-                ColumnType colType = Schema.GetColumnType(col);
+                ColumnType colType = Schema[col].Type;
                 Ch.AssertValue(colType);
                 Func<int, Delegate> creator = CreateTypedGetter<int>;
                 var typedCreator = creator.GetMethodInfo().GetGenericMethodDefinition().MakeGenericMethod(colType.RawType);
@@ -282,7 +284,6 @@ namespace Microsoft.ML.Runtime.Data
             {
                 if (State != CursorState.Done)
                 {
-                    Ch.Done();
                     Ch.Dispose();
                     if (_currentCursor != null)
                         _currentCursor.Dispose();
@@ -300,10 +301,10 @@ namespace Microsoft.ML.Runtime.Data
         {
             private readonly IRowCursor[] _cursorSet;
             private readonly MultinomialWithoutReplacementSampler _sampler;
-            private readonly IRandom _rand;
+            private readonly Random _rand;
             private int _currentSourceIndex;
 
-            public RandCursor(AppendRowsDataView parent, Func<int, bool> needCol, IRandom rand, int[] counts)
+            public RandCursor(AppendRowsDataView parent, Func<int, bool> needCol, Random rand, int[] counts)
                 : base(parent)
             {
                 Ch.AssertValue(needCol);
@@ -372,7 +373,6 @@ namespace Microsoft.ML.Runtime.Data
             {
                 if (State != CursorState.Done)
                 {
-                    Ch.Done();
                     Ch.Dispose();
                     foreach (IRowCursor c in _cursorSet)
                         c.Dispose();
@@ -397,7 +397,7 @@ namespace Microsoft.ML.Runtime.Data
             private const int BatchSize = 1000;
 
             private readonly int[] _rowsLeft;
-            private readonly IRandom _rand;
+            private readonly Random _rand;
             private readonly int[] _batch;
             private readonly IExceptionContext _ectx;
 
@@ -405,7 +405,7 @@ namespace Microsoft.ML.Runtime.Data
             private int _batchPos;
             private int _totalLeft;
 
-            public MultinomialWithoutReplacementSampler(IExceptionContext context, int[] counts, IRandom rand)
+            public MultinomialWithoutReplacementSampler(IExceptionContext context, int[] counts, Random rand)
             {
                 Contracts.AssertValue(context);
                 _ectx = context;

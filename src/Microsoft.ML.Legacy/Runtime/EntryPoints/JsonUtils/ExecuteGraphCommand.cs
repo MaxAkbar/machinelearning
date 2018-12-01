@@ -21,7 +21,7 @@ using Newtonsoft.Json.Linq;
 
 namespace Microsoft.ML.Runtime.EntryPoints.JsonUtils
 {
-    public sealed class ExecuteGraphCommand : ICommand
+    internal sealed class ExecuteGraphCommand : ICommand
     {
         public sealed class Arguments
         {
@@ -59,8 +59,7 @@ namespace Microsoft.ML.Runtime.EntryPoints.JsonUtils
                 throw _host.Except(ex, "Failed to parse experiment graph: {0}", ex.Message);
             }
 
-            var catalog = _host.ComponentCatalog;
-            var runner = new GraphRunner(_host, catalog, graph[FieldNames.Nodes] as JArray);
+            var runner = new GraphRunner(_host, graph[FieldNames.Nodes] as JArray);
 
             // Setting inputs.
             var jInputs = graph[FieldNames.Inputs] as JObject;

@@ -4,20 +4,20 @@
 
 #pragma warning disable 420 // volatile with Interlocked.CompareExchange
 
-using Float = System.Single;
-
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Reflection;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Data;
+using Microsoft.ML.Runtime.Internal.Internallearn;
 using Microsoft.ML.Runtime.Internal.Utilities;
 using Microsoft.ML.Runtime.Model;
 using Microsoft.ML.Runtime.Model.Onnx;
 using Microsoft.ML.Runtime.Model.Pfa;
-using Microsoft.ML.Runtime.Internal.Internallearn;
 using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using Float = System.Single;
 
 [assembly: LoadableClass(typeof(SchemaBindablePredictorWrapper), null, typeof(SignatureLoadModel),
     "Bindable Mapper", SchemaBindablePredictorWrapper.LoaderSignature)]
@@ -44,9 +44,9 @@ namespace Microsoft.ML.Runtime.Data
         protected readonly IValueMapper ValueMapper;
         protected readonly ColumnType ScoreType;
 
-        public bool CanSavePfa => (ValueMapper as ICanSavePfa)?.CanSavePfa == true;
+        bool ICanSavePfa.CanSavePfa => (ValueMapper as ICanSavePfa)?.CanSavePfa == true;
 
-        public bool CanSaveOnnx => (ValueMapper as ICanSaveOnnx)?.CanSaveOnnx == true;
+        bool ICanSaveOnnx.CanSaveOnnx(OnnxContext ctx) => (ValueMapper as ICanSaveOnnx)?.CanSaveOnnx(ctx) == true;
 
         public SchemaBindablePredictorWrapperBase(IPredictor predictor)
         {
@@ -89,17 +89,31 @@ namespace Microsoft.ML.Runtime.Data
             ctx.SaveModel(Predictor, ModelFileUtils.DirPredictor);
         }
 
-        public virtual void SaveAsPfa(BoundPfaContext ctx, RoleMappedSchema schema, string[] outputNames)
+        void IBindableCanSavePfa.SaveAsPfa(BoundPfaContext ctx, RoleMappedSchema schema, string[] outputNames)
         {
             Contracts.CheckValue(ctx, nameof(ctx));
             Contracts.CheckValue(schema, nameof(schema));
             Contracts.Assert(ValueMapper is ISingleCanSavePfa);
-            var mapper = (ISingleCanSavePfa)ValueMapper;
+            SaveAsPfaCore(ctx, schema, outputNames);
+        }
 
+        [BestFriend]
+        private protected virtual void SaveAsPfaCore(BoundPfaContext ctx, RoleMappedSchema schema, string[] outputNames)
+        {
             ctx.Hide(outputNames);
         }
 
-        public virtual bool SaveAsOnnx(OnnxContext ctx, RoleMappedSchema schema, string[] outputNames) => false;
+        bool IBindableCanSaveOnnx.SaveAsOnnx(OnnxContext ctx, RoleMappedSchema schema, string[] outputNames)
+        {
+            Contracts.CheckValue(ctx, nameof(ctx));
+            Contracts.CheckValue(schema, nameof(schema));
+            Contracts.Assert(ValueMapper is ISingleCanSaveOnnx);
+            var mapper = (ISingleCanSaveOnnx)ValueMapper;
+            return SaveAsOnnxCore(ctx, schema, outputNames);
+        }
+
+        [BestFriend]
+        private protected virtual bool SaveAsOnnxCore(OnnxContext ctx, RoleMappedSchema schema, string[] outputNames) => false;
 
         public ISchemaBoundMapper Bind(IHostEnvironment env, RoleMappedSchema schema)
         {
@@ -124,9 +138,7 @@ namespace Microsoft.ML.Runtime.Data
                             throw ch.Except("Incompatible features column type: '{0}' vs '{1}'", type, typeIn);
                     }
                 }
-                var mapper = BindCore(ch, schema);
-                ch.Done();
-                return mapper;
+                return BindCore(ch, schema);
             }
         }
 
@@ -155,7 +167,7 @@ namespace Microsoft.ML.Runtime.Data
                 (ref TDst dst) =>
                 {
                     featureGetter(ref features);
-                    map(ref features, ref dst);
+                    map(in features, ref dst);
                 };
         }
 
@@ -179,10 +191,10 @@ namespace Microsoft.ML.Runtime.Data
             private readonly SchemaBindablePredictorWrapperBase _parent;
 
             public RoleMappedSchema InputRoleMappedSchema { get; }
-            public ISchema Schema { get; }
+            public Schema OutputSchema { get; }
             public ISchemaBindableMapper Bindable => _parent;
 
-            public SingleValueRowMapper(RoleMappedSchema schema, SchemaBindablePredictorWrapperBase parent, ISchema outputSchema)
+            public SingleValueRowMapper(RoleMappedSchema schema, SchemaBindablePredictorWrapperBase parent, Schema outputSchema)
             {
                 Contracts.AssertValue(schema);
                 Contracts.AssertValue(parent);
@@ -191,12 +203,12 @@ namespace Microsoft.ML.Runtime.Data
 
                 _parent = parent;
                 InputRoleMappedSchema = schema;
-                Schema = outputSchema;
+                OutputSchema = outputSchema;
             }
 
             public Func<int, bool> GetDependencies(Func<int, bool> predicate)
             {
-                for (int i = 0; i < Schema.ColumnCount; i++)
+                for (int i = 0; i < OutputSchema.ColumnCount; i++)
                 {
                     if (predicate(i))
                         return col => col == InputRoleMappedSchema.Feature.Index;
@@ -209,7 +221,7 @@ namespace Microsoft.ML.Runtime.Data
                 yield return RoleMappedSchema.ColumnRole.Feature.Bind(InputRoleMappedSchema.Feature.Name);
             }
 
-            public ISchema InputSchema => InputRoleMappedSchema.Schema;
+            public Schema InputSchema => InputRoleMappedSchema.Schema;
 
             public IRow GetRow(IRow input, Func<int, bool> predicate, out Action disposer)
             {
@@ -220,7 +232,7 @@ namespace Microsoft.ML.Runtime.Data
                 if (predicate(0))
                     getters[0] = _parent.GetPredictionGetter(input, InputRoleMappedSchema.Feature.Index);
                 disposer = null;
-                return new SimpleRow(Schema, input, getters);
+                return new SimpleRow(OutputSchema, input, getters);
             }
         }
     }
@@ -273,7 +285,7 @@ namespace Microsoft.ML.Runtime.Data
             base.Save(ctx);
         }
 
-        public override void SaveAsPfa(BoundPfaContext ctx, RoleMappedSchema schema, string[] outputNames)
+        private protected override void SaveAsPfaCore(BoundPfaContext ctx, RoleMappedSchema schema, string[] outputNames)
         {
             Contracts.CheckValue(ctx, nameof(ctx));
             Contracts.CheckValue(schema, nameof(schema));
@@ -289,7 +301,7 @@ namespace Microsoft.ML.Runtime.Data
             ctx.DeclareVar(outputNames[0], scoreToken);
         }
 
-        public override bool SaveAsOnnx(OnnxContext ctx, RoleMappedSchema schema, string[] outputNames)
+        private protected override bool SaveAsOnnxCore(OnnxContext ctx, RoleMappedSchema schema, string[] outputNames)
         {
             Contracts.CheckValue(ctx, nameof(ctx));
             Contracts.CheckValue(schema, nameof(schema));
@@ -307,7 +319,7 @@ namespace Microsoft.ML.Runtime.Data
 
         protected override ISchemaBoundMapper BindCore(IChannel ch, RoleMappedSchema schema)
         {
-            var outputSchema = new ScoreMapperSchema(ScoreType, _scoreColumnKind);
+            var outputSchema = Schema.Create(new ScoreMapperSchema(ScoreType, _scoreColumnKind));
             return new SingleValueRowMapper(schema, this, outputSchema);
         }
 
@@ -384,7 +396,7 @@ namespace Microsoft.ML.Runtime.Data
             base.Save(ctx);
         }
 
-        public override void SaveAsPfa(BoundPfaContext ctx, RoleMappedSchema schema, string[] outputNames)
+        private protected override void SaveAsPfaCore(BoundPfaContext ctx, RoleMappedSchema schema, string[] outputNames)
         {
             Contracts.CheckValue(ctx, nameof(ctx));
             Contracts.CheckValue(schema, nameof(schema));
@@ -404,7 +416,7 @@ namespace Microsoft.ML.Runtime.Data
             Contracts.Assert(ctx.TokenOrNullForName(outputNames[1]) == probToken.ToString());
         }
 
-        public override bool SaveAsOnnx(OnnxContext ctx, RoleMappedSchema schema, string[] outputNames)
+        private protected override bool SaveAsOnnxCore(OnnxContext ctx, RoleMappedSchema schema, string[] outputNames)
         {
             Contracts.CheckValue(ctx, nameof(ctx));
             Contracts.CheckValue(schema, nameof(schema));
@@ -456,12 +468,12 @@ namespace Microsoft.ML.Runtime.Data
         private sealed class CalibratedRowMapper : ISchemaBoundRowMapper
         {
             private readonly SchemaBindableBinaryPredictorWrapper _parent;
-            private readonly ScoreMapperSchemaBase _outputSchema;
 
             public RoleMappedSchema InputRoleMappedSchema { get; }
-            public ISchema InputSchema => InputRoleMappedSchema.Schema;
+            public Schema InputSchema => InputRoleMappedSchema.Schema;
 
-            public ISchema Schema => _outputSchema;
+            public Schema OutputSchema { get; }
+
             public ISchemaBindableMapper Bindable => _parent;
 
             public CalibratedRowMapper(RoleMappedSchema schema, SchemaBindableBinaryPredictorWrapper parent)
@@ -473,7 +485,7 @@ namespace Microsoft.ML.Runtime.Data
 
                 _parent = parent;
                 InputRoleMappedSchema = schema;
-                _outputSchema = new BinaryClassifierSchema();
+                OutputSchema = Schema.Create(new BinaryClassifierSchema());
 
                 if (schema.Feature != null)
                 {
@@ -485,7 +497,7 @@ namespace Microsoft.ML.Runtime.Data
 
             public Func<int, bool> GetDependencies(Func<int, bool> predicate)
             {
-                for (int i = 0; i < Schema.ColumnCount; i++)
+                for (int i = 0; i < OutputSchema.ColumnCount; i++)
                 {
                     if (predicate(i) && InputRoleMappedSchema.Feature != null)
                         return col => col == InputRoleMappedSchema.Feature.Index;
@@ -507,7 +519,7 @@ namespace Microsoft.ML.Runtime.Data
                 if (active[0] || active[1])
                 {
                     // Put all captured locals at this scope.
-                    var featureGetter = InputRoleMappedSchema.Feature!= null ? input.GetGetter<VBuffer<Float>>(InputRoleMappedSchema.Feature.Index) : null;
+                    var featureGetter = InputRoleMappedSchema.Feature != null ? input.GetGetter<VBuffer<Float>>(InputRoleMappedSchema.Feature.Index) : null;
                     Float prob = 0;
                     Float score = 0;
                     long cachedPosition = -1;
@@ -549,7 +561,7 @@ namespace Microsoft.ML.Runtime.Data
                     if (featureGetter != null)
                         featureGetter(ref features);
 
-                    mapper(ref features, ref score, ref prob);
+                    mapper(in features, ref score, ref prob);
                     cachedPosition = input.Position;
                 }
             }
@@ -557,10 +569,10 @@ namespace Microsoft.ML.Runtime.Data
             public IRow GetRow(IRow input, Func<int, bool> predicate, out Action disposer)
             {
                 Contracts.AssertValue(input);
-                var active = Utils.BuildArray(Schema.ColumnCount, predicate);
+                var active = Utils.BuildArray(OutputSchema.ColumnCount, predicate);
                 var getters = CreateGetters(input, active);
                 disposer = null;
-                return new SimpleRow(Schema, input, getters);
+                return new SimpleRow(OutputSchema, input, getters);
             }
         }
     }
@@ -642,7 +654,7 @@ namespace Microsoft.ML.Runtime.Data
 
         protected override ISchemaBoundMapper BindCore(IChannel ch, RoleMappedSchema schema)
         {
-            return new SingleValueRowMapper(schema, this, new Schema(ScoreType, _quantiles));
+            return new SingleValueRowMapper(schema, this, Schema.Create(new SchemaImpl(ScoreType, _quantiles)));
         }
 
         protected override Delegate GetPredictionGetter(IRow input, int colSrc)
@@ -670,17 +682,17 @@ namespace Microsoft.ML.Runtime.Data
                 {
                     featureGetter(ref features);
                     Contracts.Check(features.Length == featureCount || featureCount == 0);
-                    map(ref features, ref value);
+                    map(in features, ref value);
                 };
             return del;
         }
 
-        private sealed class Schema : ScoreMapperSchemaBase
+        private sealed class SchemaImpl : ScoreMapperSchemaBase
         {
             private readonly string[] _slotNames;
             private readonly MetadataUtils.MetadataGetter<VBuffer<ReadOnlyMemory<char>>> _getSlotNames;
 
-            public Schema(ColumnType scoreType, Double[] quantiles)
+            public SchemaImpl(ColumnType scoreType, Double[] quantiles)
                 : base(scoreType, MetadataUtils.Const.ScoreColumnKind.QuantileRegression)
             {
                 Contracts.Assert(Utils.Size(quantiles) > 0);
@@ -743,12 +755,10 @@ namespace Microsoft.ML.Runtime.Data
                 Contracts.Assert(Utils.Size(_slotNames) > 0);
 
                 int size = Utils.Size(_slotNames);
-                var values = dst.Values;
-                if (Utils.Size(values) < size)
-                    values = new ReadOnlyMemory<char>[size];
+                var editor = VBufferEditor.Create(ref dst, size);
                 for (int i = 0; i < _slotNames.Length; i++)
-                    values[i] = _slotNames[i].AsMemory();
-                dst = new VBuffer<ReadOnlyMemory<char>>(size, values, dst.Indices);
+                    editor.Values[i] = _slotNames[i].AsMemory();
+                dst = editor.Commit();
             }
         }
     }

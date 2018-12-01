@@ -8,6 +8,7 @@ using Microsoft.ML.Runtime.Data.IO;
 using Microsoft.ML.Runtime.Model;
 using Microsoft.ML.Runtime.RunTests;
 using Microsoft.ML.Runtime.Tools;
+using Microsoft.ML.Transforms;
 using System.IO;
 using Xunit;
 using Xunit.Abstractions;
@@ -42,11 +43,11 @@ namespace Microsoft.ML.Tests.Transformers
             };
 
             var dataView = ComponentCreation.CreateDataView(Env, data);
-            var pipe = new NAReplaceEstimator(Env,
-                new NAReplaceTransform.ColumnInfo("A", "NAA", NAReplaceTransform.ColumnInfo.ReplacementMode.Mean),
-                new NAReplaceTransform.ColumnInfo("B", "NAB", NAReplaceTransform.ColumnInfo.ReplacementMode.Mean),
-                new NAReplaceTransform.ColumnInfo("C", "NAC", NAReplaceTransform.ColumnInfo.ReplacementMode.Mean),
-                new NAReplaceTransform.ColumnInfo("D", "NAD", NAReplaceTransform.ColumnInfo.ReplacementMode.Mean));
+            var pipe = new MissingValueReplacingEstimator(Env,
+                new MissingValueReplacingTransformer.ColumnInfo("A", "NAA", MissingValueReplacingTransformer.ColumnInfo.ReplacementMode.Mean),
+                new MissingValueReplacingTransformer.ColumnInfo("B", "NAB", MissingValueReplacingTransformer.ColumnInfo.ReplacementMode.Mean),
+                new MissingValueReplacingTransformer.ColumnInfo("C", "NAC", MissingValueReplacingTransformer.ColumnInfo.ReplacementMode.Mean),
+                new MissingValueReplacingTransformer.ColumnInfo("D", "NAD", MissingValueReplacingTransformer.ColumnInfo.ReplacementMode.Mean));
             TestEstimatorCore(pipe, dataView);
             Done();
         }
@@ -62,16 +63,16 @@ namespace Microsoft.ML.Tests.Transformers
                 VectorDoulbe: ctx.LoadDouble(1, 4)
             ));
 
-            var data = reader.Read(new MultiFileSource(dataPath));
+            var data = reader.Read(dataPath);
             var wrongCollection = new[] { new TestClass() { A = 1, B = 3, C = new float[2] { 1, 2 }, D = new double[2] { 3, 4 } } };
             var invalidData = ComponentCreation.CreateDataView(Env, wrongCollection);
 
             var est = data.MakeNewEstimator().
                    Append(row => (
-                   A: row.ScalarFloat.ReplaceWithMissingValues(NAReplaceTransform.ColumnInfo.ReplacementMode.Maximum),
-                   B: row.ScalarDouble.ReplaceWithMissingValues(NAReplaceTransform.ColumnInfo.ReplacementMode.Mean),
-                   C: row.VectorFloat.ReplaceWithMissingValues(NAReplaceTransform.ColumnInfo.ReplacementMode.Mean),
-                   D: row.VectorDoulbe.ReplaceWithMissingValues(NAReplaceTransform.ColumnInfo.ReplacementMode.Minimum)
+                   A: row.ScalarFloat.ReplaceNaNValues(MissingValueReplacingTransformer.ColumnInfo.ReplacementMode.Maximum),
+                   B: row.ScalarDouble.ReplaceNaNValues(MissingValueReplacingTransformer.ColumnInfo.ReplacementMode.Mean),
+                   C: row.VectorFloat.ReplaceNaNValues(MissingValueReplacingTransformer.ColumnInfo.ReplacementMode.Mean),
+                   D: row.VectorDoulbe.ReplaceNaNValues(MissingValueReplacingTransformer.ColumnInfo.ReplacementMode.Minimum)
                    ));
 
             TestEstimatorCore(est.AsDynamic, data.AsDynamic, invalidInput: invalidData);
@@ -79,10 +80,10 @@ namespace Microsoft.ML.Tests.Transformers
             using (var ch = Env.Start("save"))
             {
                 var saver = new TextSaver(Env, new TextSaver.Arguments { Silent = true });
-                IDataView savedData = TakeFilter.Create(Env, est.Fit(data).Transform(data).AsDynamic, 4);
-                savedData = new ChooseColumnsTransform(Env, savedData, "A", "B", "C", "D");
+                var savedData = TakeFilter.Create(Env, est.Fit(data).Transform(data).AsDynamic, 4);
+                var view = ColumnSelectingTransformer.CreateKeep(Env, savedData, new[] { "A", "B", "C", "D" });
                 using (var fs = File.Create(outputPath))
-                    DataSaverUtils.SaveDataView(ch, saver, savedData, fs, keepHidden: true);
+                    DataSaverUtils.SaveDataView(ch, saver, view, fs, keepHidden: true);
             }
 
             CheckEquality("NAReplace", "featurized.tsv");
@@ -107,11 +108,11 @@ namespace Microsoft.ML.Tests.Transformers
             };
 
             var dataView = ComponentCreation.CreateDataView(Env, data);
-            var pipe = new NAReplaceEstimator(Env,
-                new NAReplaceTransform.ColumnInfo("A", "NAA", NAReplaceTransform.ColumnInfo.ReplacementMode.Mean),
-                new NAReplaceTransform.ColumnInfo("B", "NAB", NAReplaceTransform.ColumnInfo.ReplacementMode.Mean),
-                new NAReplaceTransform.ColumnInfo("C", "NAC", NAReplaceTransform.ColumnInfo.ReplacementMode.Mean),
-                new NAReplaceTransform.ColumnInfo("D", "NAD", NAReplaceTransform.ColumnInfo.ReplacementMode.Mean));
+            var pipe = new MissingValueReplacingEstimator(Env,
+                new MissingValueReplacingTransformer.ColumnInfo("A", "NAA", MissingValueReplacingTransformer.ColumnInfo.ReplacementMode.Mean),
+                new MissingValueReplacingTransformer.ColumnInfo("B", "NAB", MissingValueReplacingTransformer.ColumnInfo.ReplacementMode.Mean),
+                new MissingValueReplacingTransformer.ColumnInfo("C", "NAC", MissingValueReplacingTransformer.ColumnInfo.ReplacementMode.Mean),
+                new MissingValueReplacingTransformer.ColumnInfo("D", "NAD", MissingValueReplacingTransformer.ColumnInfo.ReplacementMode.Mean));
 
             var result = pipe.Fit(dataView).Transform(dataView);
             var resultRoles = new RoleMappedData(result);

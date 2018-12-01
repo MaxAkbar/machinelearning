@@ -4,6 +4,7 @@
 
 using System;
 using System.IO;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime.Data;
 
 namespace Microsoft.ML.Runtime.EntryPoints
@@ -23,14 +24,14 @@ namespace Microsoft.ML.Runtime.EntryPoints
         // however that doing so may cause issues for composing transform models. For example,
         // if transform model A needs column X and model B needs Y, that is NOT produced by A,
         // then trimming A's input schema would cause composition to fail.
-        ISchema InputSchema { get; }
+        Schema InputSchema { get; }
 
         /// <summary>
         /// The output schema that this transform model was originally instantiated on. The schema resulting
         /// from <see cref="Apply(IHostEnvironment, ITransformModel)"/> may differ from this, similarly to how
         /// <see cref="InputSchema"/> may differ from the schema of dataviews we apply this transform model to.
         /// </summary>
-        ISchema OutputSchema { get; }
+        Schema OutputSchema { get; }
 
         /// <summary>
         /// Apply the transform(s) in the model to the given input data.

@@ -2,11 +2,8 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using System;
-using System.Collections.Generic;
-using System.Runtime.InteropServices;
-using System.Security;
 using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
@@ -16,8 +13,13 @@ using Microsoft.ML.Runtime.Internal.Calibration;
 using Microsoft.ML.Runtime.Internal.Internallearn;
 using Microsoft.ML.Runtime.Internal.Utilities;
 using Microsoft.ML.Runtime.Learners;
-using Microsoft.ML.Runtime.SymSgd;
 using Microsoft.ML.Runtime.Training;
+using Microsoft.ML.Trainers.SymSgd;
+using Microsoft.ML.Transforms;
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Security;
 
 [assembly: LoadableClass(typeof(SymSgdClassificationTrainer), typeof(SymSgdClassificationTrainer.Arguments),
     new[] { typeof(SignatureBinaryClassifierTrainer), typeof(SignatureTrainer), typeof(SignatureFeatureScorerTrainer) },
@@ -27,7 +29,7 @@ using Microsoft.ML.Runtime.Training;
 
 [assembly: LoadableClass(typeof(void), typeof(SymSgdClassificationTrainer), null, typeof(SignatureEntryPointModule), SymSgdClassificationTrainer.LoadNameValue)]
 
-namespace Microsoft.ML.Runtime.SymSgd
+namespace Microsoft.ML.Trainers.SymSgd
 {
     using TPredictor = IPredictorWithFeatureWeights<float>;
 
@@ -109,12 +111,12 @@ namespace Microsoft.ML.Runtime.SymSgd
                 idvToFeedTrain = idvToShuffle;
             else
             {
-                var shuffleArgs = new ShuffleTransform.Arguments
+                var shuffleArgs = new RowShufflingTransformer.Arguments
                 {
                     PoolOnly = false,
                     ForceShuffle = _args.Shuffle
                 };
-                idvToFeedTrain = new ShuffleTransform(Host, shuffleArgs, idvToShuffle);
+                idvToFeedTrain = new RowShufflingTransformer(Host, shuffleArgs, idvToShuffle);
             }
 
             ch.Assert(idvToFeedTrain.CanShuffle);
@@ -132,10 +134,9 @@ namespace Microsoft.ML.Runtime.SymSgd
             return examplesToFeedTrain;
         }
 
-        protected override TPredictor TrainModelCore(TrainContext context)
+        private protected override TPredictor TrainModelCore(TrainContext context)
         {
             Host.CheckValue(context, nameof(context));
-            TPredictor pred;
             using (var ch = Host.Start("Training"))
             {
                 var preparedData = PrepareDataFromTrainingExamples(ch, context.TrainingSet, out int weightSetCount);
@@ -144,10 +145,8 @@ namespace Microsoft.ML.Runtime.SymSgd
                 linInitPred = linInitPred ?? initPred as LinearPredictor;
                 Host.CheckParam(context.InitialPredictor == null || linInitPred != null, nameof(context),
                     "Initial predictor was not a linear predictor.");
-                pred = TrainCore(ch, preparedData, linInitPred, weightSetCount);
-                ch.Done();
+                return TrainCore(ch, preparedData, linInitPred, weightSetCount);
             }
-            return pred;
         }
 
         public override PredictionKind PredictionKind => PredictionKind.BinaryClassification;
@@ -159,7 +158,10 @@ namespace Microsoft.ML.Runtime.SymSgd
         /// <param name="labelColumn">The name of the label column.</param>
         /// <param name="featureColumn">The name of the feature column.</param>
         /// <param name="advancedSettings">A delegate to apply all the advanced arguments to the algorithm.</param>
-        public SymSgdClassificationTrainer(IHostEnvironment env, string featureColumn, string labelColumn, Action<Arguments> advancedSettings = null)
+        public SymSgdClassificationTrainer(IHostEnvironment env,
+            string labelColumn = DefaultColumnNames.Label,
+            string featureColumn = DefaultColumnNames.Features,
+            Action<Arguments> advancedSettings = null)
             : base(Contracts.CheckRef(env, nameof(env)).Register(LoadNameValue), TrainerUtils.MakeR4VecFeature(featureColumn),
                   TrainerUtils.MakeBoolScalarLabel(labelColumn))
         {
@@ -171,7 +173,7 @@ namespace Microsoft.ML.Runtime.SymSgd
             _args.FeatureColumn = featureColumn;
             _args.LabelColumn = labelColumn;
 
-            Info = new TrainerInfo();
+            Info = new TrainerInfo(supportIncrementalTrain:true);
         }
 
         /// <summary>
@@ -183,7 +185,7 @@ namespace Microsoft.ML.Runtime.SymSgd
         {
             args.Check(Host);
             _args = args;
-            Info = new TrainerInfo();
+            Info = new TrainerInfo(supportIncrementalTrain: true);
         }
 
         private TPredictor CreatePredictor(VBuffer<float> weights, float bias)
@@ -191,14 +193,17 @@ namespace Microsoft.ML.Runtime.SymSgd
             Host.CheckParam(weights.Length > 0, nameof(weights));
 
             VBuffer<float> maybeSparseWeights = default;
-            VBufferUtils.CreateMaybeSparseCopy(ref weights, ref maybeSparseWeights,
+            VBufferUtils.CreateMaybeSparseCopy(in weights, ref maybeSparseWeights,
                 Conversions.Instance.GetIsDefaultPredicate<float>(NumberType.R4));
-            var predictor = new LinearBinaryPredictor(Host, ref maybeSparseWeights, bias);
+            var predictor = new LinearBinaryPredictor(Host, in maybeSparseWeights, bias);
             return new ParameterMixingCalibratedPredictor(Host, predictor, new PlattCalibrator(Host, -1, 0));
         }
 
-        protected override BinaryPredictionTransformer<TPredictor> MakeTransformer(TPredictor model, ISchema trainSchema)
+        protected override BinaryPredictionTransformer<TPredictor> MakeTransformer(TPredictor model, Schema trainSchema)
              => new BinaryPredictionTransformer<TPredictor>(Host, model, trainSchema, FeatureColumn.Name);
+
+        public BinaryPredictionTransformer<TPredictor> Train(IDataView trainData, TPredictor initialPredictor = null)
+            => TrainTransformer(trainData,  initPredictor: initialPredictor);
 
         protected override SchemaShape.Column[] GetOutputColumnsCore(SchemaShape inputSchema)
         {
@@ -234,7 +239,7 @@ namespace Microsoft.ML.Runtime.SymSgd
         /// This struct holds the information about the size, label and isDense of each instance
         /// to be able to pass it to the native code.
         /// </summary>
-        private struct InstanceProperties
+        private readonly struct InstanceProperties
         {
             public readonly int FeatureCount;
             public readonly float Label;
@@ -349,15 +354,13 @@ namespace Microsoft.ML.Runtime.SymSgd
             }
 
             /// <summary>
-            /// Tries to add array <paramref name="instArray"/> to the storage without violating the restriction of memorySize.
+            /// Tries to add span <paramref name="instArray"/> to the storage without violating the restriction of memorySize.
             /// </summary>
-            /// <param name="instArray">The array to be added</param>
-            /// <param name="instArrayLength">Length of the array. <paramref name="instArray"/>.Length is unreliable since TLC cursoring
-            /// has its own allocation mechanism.</param>
+            /// <param name="instArray">The span to be added</param>
             /// <returns>Return if the allocation was successful</returns>
-            public bool AddToStorage(T[] instArray, int instArrayLength)
+            public bool AddToStorage(ReadOnlySpan<T> instArray)
             {
-                _ch.Assert(0 < instArrayLength && instArrayLength <= Utils.Size(instArray));
+                var instArrayLength = instArray.Length;
                 _ch.Assert(instArrayLength * _sizeofT * 2 < _trainer.AcceleratedMemoryBudgetBytes);
                 if (instArrayLength > _veryLongArrayLength)
                 {
@@ -397,7 +400,7 @@ namespace Microsoft.ML.Runtime.SymSgd
                     _indexInCurArray = 0;
                     _storageIndex++;
                 }
-                Array.Copy(instArray, 0, _storage[_storageIndex].Buffer, _indexInCurArray, instArrayLength);
+                instArray.CopyTo(_storage[_storageIndex].Buffer.AsSpan(_indexInCurArray));
                 _indexInCurArray += instArrayLength;
                 return true;
             }
@@ -524,7 +527,8 @@ namespace Microsoft.ML.Runtime.SymSgd
 
                 while (_cursorMoveNext)
                 {
-                    int featureCount = _cursor.Features.Count;
+                    var featureValues = _cursor.Features.GetValues();
+                    int featureCount = featureValues.Length;
                     // If the instance has no feature, ignore it!
                     if (featureCount == 0)
                     {
@@ -545,10 +549,10 @@ namespace Microsoft.ML.Runtime.SymSgd
                     bool couldLoad = true;
                     if (!_cursor.Features.IsDense)
                         // If it is a sparse instance, load its indices to instIndices buffer
-                        couldLoad = _instIndices.AddToStorage(_cursor.Features.Indices, featureCount);
+                        couldLoad = _instIndices.AddToStorage(_cursor.Features.GetIndices());
                     // Load values of an instance into instValues
                     if (couldLoad)
-                        couldLoad = _instValues.AddToStorage(_cursor.Features.Values, featureCount);
+                        couldLoad = _instValues.AddToStorage(featureValues);
 
                     // If the load was successful, load the instance properties to instanceProperties
                     if (couldLoad)
@@ -651,6 +655,8 @@ namespace Microsoft.ML.Runtime.SymSgd
             else
                 weights = VBufferUtils.CreateDense<float>(numFeatures);
 
+            var weightsEditor = VBufferEditor.CreateFromBuffer(ref weights);
+
             // Reference: Parasail. SymSGD.
             bool tuneLR = _args.LearningRate == null;
             var lr = _args.LearningRate ?? 1.0f;
@@ -685,7 +691,7 @@ namespace Microsoft.ML.Runtime.SymSgd
                             pch.SetHeader(new ProgressHeader(new[] { "iterations" }),
                                 entry => entry.SetProgress(0, state.PassIteration, _args.NumberOfIterations));
                             // If fully loaded, call the SymSGDNative and do not come back until learned for all iterations.
-                            Native.LearnAll(inputDataManager, tuneLR, ref lr, l2Const, piw, weights.Values, ref bias, numFeatures,
+                            Native.LearnAll(inputDataManager, tuneLR, ref lr, l2Const, piw, weightsEditor.Values, ref bias, numFeatures,
                                 _args.NumberOfIterations, numThreads, tuneNumLocIter, ref numLocIter, _args.Tolerance, _args.Shuffle, shouldInitialize, stateGCHandle);
                             shouldInitialize = false;
                         }
@@ -706,7 +712,7 @@ namespace Microsoft.ML.Runtime.SymSgd
                                 // If all of this leaves us with 0 passes, then set numPassesForThisBatch to 1
                                 numPassesForThisBatch = Math.Max(1, numPassesForThisBatch);
                                 state.PassIteration = iter;
-                                Native.LearnAll(inputDataManager, tuneLR, ref lr, l2Const, piw, weights.Values, ref bias, numFeatures,
+                                Native.LearnAll(inputDataManager, tuneLR, ref lr, l2Const, piw, weightsEditor.Values, ref bias, numFeatures,
                                     numPassesForThisBatch, numThreads, tuneNumLocIter, ref numLocIter, _args.Tolerance, _args.Shuffle, shouldInitialize, stateGCHandle);
                                 shouldInitialize = false;
 
@@ -727,7 +733,7 @@ namespace Microsoft.ML.Runtime.SymSgd
 
                         // Maps back the dense features that are mislocated
                         if (numThreads > 1)
-                            Native.MapBackWeightVector(weights.Values, stateGCHandle);
+                            Native.MapBackWeightVector(weightsEditor.Values, stateGCHandle);
                         Native.DeallocateSequentially(stateGCHandle);
                     }
                 }
@@ -751,6 +757,9 @@ namespace Microsoft.ML.Runtime.SymSgd
 
         private static unsafe class Native
         {
+            //To triger the loading of MKL library since SymSGD native library depends on it.
+            static Native() => ErrorMessage(0);
+
             internal const string DllName = "SymSgdNative";
 
             [DllImport(DllName), SuppressUnmanagedCodeSecurity]
@@ -778,7 +787,7 @@ namespace Microsoft.ML.Runtime.SymSgd
             /// <param name="shouldInitialize">Specifies if this is the first time to run SymSGD</param>
             /// <param name="stateGCHandle"></param>
             public static void LearnAll(InputDataManager inputDataManager, bool tuneLR,
-                ref float lr, float l2Const, float piw, float[] weightVector, ref float bias, int numFeatres, int numPasses,
+                ref float lr, float l2Const, float piw, Span<float> weightVector, ref float bias, int numFeatres, int numPasses,
                 int numThreads, bool tuneNumLocIter, ref int numLocIter, float tolerance, bool needShuffle, bool shouldInitialize, GCHandle stateGCHandle)
             {
                 inputDataManager.PrepareCursoring();
@@ -832,7 +841,7 @@ namespace Microsoft.ML.Runtime.SymSgd
             /// </summary>
             /// <param name="weightVector">The weight vector</param>
             /// <param name="stateGCHandle"></param>
-            public static void MapBackWeightVector(float[] weightVector, GCHandle stateGCHandle)
+            public static void MapBackWeightVector(Span<float> weightVector, GCHandle stateGCHandle)
             {
                 fixed (float* pweightVector = &weightVector[0])
                     MapBackWeightVector(pweightVector, (State*)stateGCHandle.AddrOfPinnedObject());
@@ -845,6 +854,11 @@ namespace Microsoft.ML.Runtime.SymSgd
             {
                 DeallocateSequentially((State*)stateGCHandle.AddrOfPinnedObject());
             }
+
+            // See: https://software.intel.com/en-us/node/521990
+            [System.Security.SuppressUnmanagedCodeSecurity]
+            [DllImport("MklImports", EntryPoint = "DftiErrorMessage", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Auto)]
+            private static extern IntPtr ErrorMessage(int status);
         }
 
         /// <summary>

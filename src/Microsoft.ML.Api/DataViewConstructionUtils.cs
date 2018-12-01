@@ -2,20 +2,22 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+using Microsoft.ML.Data;
+using Microsoft.ML.Runtime.Data;
+using Microsoft.ML.Runtime.Internal.Utilities;
+using Microsoft.ML.Runtime.Model;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
 
 namespace Microsoft.ML.Runtime.Api
 {
     /// <summary>
     /// A helper class to create data views based on the user-provided types.
     /// </summary>
+    [BestFriend]
     internal static class DataViewConstructionUtils
     {
         public static IDataView CreateFromList<TRow>(IHostEnvironment env, IList<TRow> data,
@@ -83,7 +85,7 @@ namespace Microsoft.ML.Runtime.Api
             public override long Position => _position;
 
             public InputRow(IHostEnvironment env, InternalSchemaDefinition schemaDef)
-                : base(env, new SchemaProxy(schemaDef), schemaDef, MakePeeks(schemaDef), c => true)
+                : base(env, SchemaBuilder.MakeSchema(GetSchemaColumns(schemaDef)), schemaDef, MakePeeks(schemaDef), c => true)
             {
                 _position = -1;
             }
@@ -136,11 +138,11 @@ namespace Microsoft.ML.Runtime.Api
 
             public long Batch => 0;
 
-            public ISchema Schema { get; }
+            public Schema Schema { get; }
 
             public abstract long Position { get; }
 
-            public InputRowBase(IHostEnvironment env, ISchema schema, InternalSchemaDefinition schemaDef, Delegate[] peeks, Func<int, bool> predicate)
+            public InputRowBase(IHostEnvironment env, Schema schema, InternalSchemaDefinition schemaDef, Delegate[] peeks, Func<int, bool> predicate)
             {
                 Contracts.AssertValue(env);
                 Host = env.Register("Row");
@@ -207,7 +209,16 @@ namespace Microsoft.ML.Runtime.Api
                         Host.Assert(colType.RawType == Nullable.GetUnderlyingType(outputType));
                     else
                         Host.Assert(colType.RawType == outputType);
-                    del = CreateDirectGetterDelegate<int>;
+
+                    if (!colType.IsKey)
+                        del = CreateDirectGetterDelegate<int>;
+                    else
+                    {
+                        var keyRawType = colType.RawType;
+                        Host.Assert(colType.AsKey.Contiguous);
+                        Func<Delegate, ColumnType, Delegate> delForKey = CreateKeyGetterDelegate<uint>;
+                        return Utils.MarshalInvoke(delForKey, keyRawType, peek, colType);
+                    }
                 }
                 else
                 {
@@ -229,11 +240,10 @@ namespace Microsoft.ML.Runtime.Api
                 {
                     peek(GetCurrentRowObject(), Position, ref buf);
                     var n = Utils.Size(buf);
-                    dst = new VBuffer<TDst>(n, Utils.Size(dst.Values) < n
-                        ? new TDst[n]
-                        : dst.Values, dst.Indices);
+                    var dstEditor = VBufferEditor.Create(ref dst, n);
                     for (int i = 0; i < n; i++)
-                        dst.Values[i] = convert(buf[i]);
+                        dstEditor.Values[i] = convert(buf[i]);
+                    dst = dstEditor.Commit();
                 });
             }
 
@@ -258,10 +268,10 @@ namespace Microsoft.ML.Runtime.Api
                 {
                     peek(GetCurrentRowObject(), Position, ref buf);
                     var n = Utils.Size(buf);
-                    dst = new VBuffer<TDst>(n, Utils.Size(dst.Values) < n ? new TDst[n] : dst.Values,
-                        dst.Indices);
+                    var dstEditor = VBufferEditor.Create(ref dst, n);
                     if (buf != null)
-                        Array.Copy(buf, dst.Values, n);
+                        buf.AsSpan(0, n).CopyTo(dstEditor.Values);
+                    dst = dstEditor.Commit();
                 });
             }
 
@@ -286,6 +296,38 @@ namespace Microsoft.ML.Runtime.Api
                 Host.AssertValue(peek);
                 return (ValueGetter<TDst>)((ref TDst dst) =>
                     peek(GetCurrentRowObject(), Position, ref dst));
+            }
+
+            private Delegate CreateKeyGetterDelegate<TDst>(Delegate peekDel, ColumnType colType)
+            {
+                // Make sure the function is dealing with key.
+                Host.Check(colType.IsKey);
+                // Following equations work only with contiguous key type.
+                Host.Check(colType.AsKey.Contiguous);
+                // Following equations work only with unsigned integers.
+                Host.Check(typeof(TDst) == typeof(ulong) || typeof(TDst) == typeof(uint) ||
+                    typeof(TDst) == typeof(byte) || typeof(TDst) == typeof(bool));
+
+                // Convert delegate function to a function which can fetch the underlying value.
+                var peek = peekDel as Peek<TRow, TDst>;
+                Host.AssertValue(peek);
+
+                TDst rawKeyValue = default;
+                ulong key = 0; // the raw key value as ulong
+                ulong min = colType.AsKey.Min;
+                ulong max = min + (ulong)colType.AsKey.Count - 1;
+                ulong result = 0; // the result as ulong
+                ValueGetter<TDst> getter = (ref TDst dst) =>
+                {
+                    peek(GetCurrentRowObject(), Position, ref rawKeyValue);
+                    key = (ulong)Convert.ChangeType(rawKeyValue, typeof(ulong));
+                    if (min <= key && key <= max)
+                        result = key - min + 1;
+                    else
+                        result = 0;
+                    dst = (TDst)Convert.ChangeType(result, typeof(TDst));
+                };
+                return getter;
             }
 
             protected abstract TRow GetCurrentRowObject();
@@ -326,14 +368,15 @@ namespace Microsoft.ML.Runtime.Api
         {
             protected readonly IHost Host;
 
-            private readonly SchemaProxy _schema;
+            private readonly Schema _schema;
+            private readonly InternalSchemaDefinition _schemaDefn;
 
             // The array of generated methods that extract the fields of the current row object.
             private readonly Delegate[] _peeks;
 
             public abstract bool CanShuffle { get; }
 
-            public ISchema Schema => _schema;
+            public Schema Schema => _schema;
 
             protected DataViewBase(IHostEnvironment env, string name, InternalSchemaDefinition schemaDefn)
             {
@@ -341,24 +384,26 @@ namespace Microsoft.ML.Runtime.Api
                 env.AssertNonWhiteSpace(name);
                 Host = env.Register(name);
                 Host.AssertValue(schemaDefn);
-                _schema = new SchemaProxy(schemaDefn);
-                int n = _schema.SchemaDefn.Columns.Length;
+
+                _schemaDefn = schemaDefn;
+                _schema = SchemaBuilder.MakeSchema(GetSchemaColumns(schemaDefn));
+                int n = schemaDefn.Columns.Length;
                 _peeks = new Delegate[n];
                 for (var i = 0; i < n; i++)
                 {
-                    var currentColumn = _schema.SchemaDefn.Columns[i];
+                    var currentColumn = schemaDefn.Columns[i];
                     _peeks[i] = currentColumn.IsComputed
                         ? currentColumn.Generator
                         : ApiUtils.GeneratePeek<DataViewBase<TRow>, TRow>(currentColumn);
                 }
             }
 
-            public abstract long? GetRowCount(bool lazy = true);
+            public abstract long? GetRowCount();
 
-            public abstract IRowCursor GetRowCursor(Func<int, bool> predicate, IRandom rand = null);
+            public abstract IRowCursor GetRowCursor(Func<int, bool> predicate, Random rand = null);
 
             public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> predicate,
-                int n, IRandom rand = null)
+                int n, Random rand = null)
             {
                 consolidator = null;
                 return new[] { GetRowCursor(predicate, rand) };
@@ -381,7 +426,7 @@ namespace Microsoft.ML.Runtime.Api
 
                 protected DataViewCursorBase(IHostEnvironment env, DataViewBase<TRow> dataView,
                     Func<int, bool> predicate)
-                    : base(env, dataView.Schema, dataView._schema.SchemaDefn, dataView._peeks, predicate)
+                    : base(env, dataView.Schema, dataView._schemaDefn, dataView._peeks, predicate)
                 {
                     Contracts.AssertValue(env);
                     Ch = env.Start("Cursor");
@@ -404,7 +449,6 @@ namespace Microsoft.ML.Runtime.Api
                 {
                     if (State != CursorState.Done)
                     {
-                        Ch.Done();
                         Ch.Dispose();
                         _position = -1;
                         State = CursorState.Done;
@@ -512,12 +556,12 @@ namespace Microsoft.ML.Runtime.Api
                 get { return true; }
             }
 
-            public override long? GetRowCount(bool lazy = true)
+            public override long? GetRowCount()
             {
                 return _data.Count;
             }
 
-            public override IRowCursor GetRowCursor(Func<int, bool> predicate, IRandom rand = null)
+            public override IRowCursor GetRowCursor(Func<int, bool> predicate, Random rand = null)
             {
                 Host.CheckValue(predicate, nameof(predicate));
                 return new Cursor(Host, "ListDataView", this, predicate, rand);
@@ -534,7 +578,7 @@ namespace Microsoft.ML.Runtime.Api
                 }
 
                 public Cursor(IHostEnvironment env, string name, ListDataView<TRow> dataView,
-                    Func<int, bool> predicate, IRandom rand)
+                    Func<int, bool> predicate, Random rand)
                     : base(env, dataView, predicate)
                 {
                     Ch.AssertValueOrNull(rand);
@@ -611,12 +655,12 @@ namespace Microsoft.ML.Runtime.Api
                 get { return false; }
             }
 
-            public override long? GetRowCount(bool lazy = true)
+            public override long? GetRowCount()
             {
                 return (_data as ICollection<TRow>)?.Count;
             }
 
-            public override IRowCursor GetRowCursor(Func<int, bool> predicate, IRandom rand = null)
+            public override IRowCursor GetRowCursor(Func<int, bool> predicate, Random rand = null)
             {
                 return new Cursor(Host, this, predicate);
             }
@@ -692,7 +736,7 @@ namespace Microsoft.ML.Runtime.Api
                 get { return false; }
             }
 
-            public override long? GetRowCount(bool lazy = true)
+            public override long? GetRowCount()
             {
                 return null;
             }
@@ -703,7 +747,7 @@ namespace Microsoft.ML.Runtime.Api
                 _current = value;
             }
 
-            public override IRowCursor GetRowCursor(Func<int, bool> predicate, IRandom rand = null)
+            public override IRowCursor GetRowCursor(Func<int, bool> predicate, Random rand = null)
             {
                 Contracts.Assert(_current != null, "The current object must be set prior to cursoring");
                 return new Cursor(Host, this, predicate);
@@ -748,72 +792,20 @@ namespace Microsoft.ML.Runtime.Api
             }
         }
 
-        private sealed class SchemaProxy : ISchema
+        internal static Schema.DetachedColumn[] GetSchemaColumns(InternalSchemaDefinition schemaDefn)
         {
-            public readonly InternalSchemaDefinition SchemaDefn;
-
-            public SchemaProxy(InternalSchemaDefinition schemaDefn)
+            Contracts.AssertValue(schemaDefn);
+            var columns = new Schema.DetachedColumn[schemaDefn.Columns.Length];
+            for (int i = 0; i < columns.Length; i++)
             {
-                SchemaDefn = schemaDefn;
+                var col = schemaDefn.Columns[i];
+                var meta = new MetadataBuilder();
+                foreach (var kvp in col.Metadata)
+                    meta.Add(kvp.Value.Kind, kvp.Value.MetadataType, kvp.Value.GetGetterDelegate());
+                columns[i] = new Schema.DetachedColumn(col.ColumnName, col.ColumnType, meta.GetMetadata());
             }
 
-            public int ColumnCount
-            {
-                get { return SchemaDefn.Columns.Length; }
-            }
-
-            public bool TryGetColumnIndex(string name, out int col)
-            {
-                col = Array.FindIndex(SchemaDefn.Columns, c => c.ColumnName == name);
-                return col >= 0;
-            }
-
-            public string GetColumnName(int col)
-            {
-                CheckColumnInRange(col);
-                return SchemaDefn.Columns[col].ColumnName;
-            }
-
-            public ColumnType GetColumnType(int col)
-            {
-                CheckColumnInRange(col);
-                return SchemaDefn.Columns[col].ColumnType;
-            }
-
-            public IEnumerable<KeyValuePair<string, ColumnType>> GetMetadataTypes(int col)
-            {
-                CheckColumnInRange(col);
-                var columnMetadata = SchemaDefn.Columns[col].Metadata;
-                if (columnMetadata == null)
-                    yield break;
-                foreach (var kvp in columnMetadata.Select(x => new KeyValuePair<string, ColumnType>(x.Key, x.Value.MetadataType)))
-                    yield return kvp;
-            }
-
-            public ColumnType GetMetadataTypeOrNull(string kind, int col)
-            {
-                if (string.IsNullOrEmpty(kind))
-                    throw MetadataUtils.ExceptGetMetadata();
-                CheckColumnInRange(col);
-                var column = SchemaDefn.Columns[col];
-                return column.Metadata.ContainsKey(kind) ? column.Metadata[kind].MetadataType : null;
-            }
-
-            public void GetMetadata<TValue>(string kind, int col, ref TValue value)
-            {
-                var metadataType = GetMetadataTypeOrNull(kind, col);
-                if (metadataType == null)
-                    throw MetadataUtils.ExceptGetMetadata();
-
-                var metadata = SchemaDefn.Columns[col].Metadata[kind];
-                metadata.GetGetter<TValue>()(ref value);
-            }
-
-            private void CheckColumnInRange(int columnIndex)
-            {
-                if (columnIndex < 0 || columnIndex >= SchemaDefn.Columns.Length)
-                    throw Contracts.Except("Column index must be between 0 and {0}", SchemaDefn.Columns.Length);
-            }
+            return columns;
         }
     }
 
@@ -833,6 +825,8 @@ namespace Microsoft.ML.Runtime.Api
         public readonly string Kind;
 
         public abstract ValueGetter<TDst> GetGetter<TDst>();
+
+        internal abstract Delegate GetGetterDelegate();
 
         protected MetadataInfo(string kind, ColumnType metadataType)
         {
@@ -952,6 +946,8 @@ namespace Microsoft.ML.Runtime.Api
             throw Contracts.ExceptNotImpl("Type '{0}' is not yet supported.", typeT.FullName);
         }
 
+        internal override Delegate GetGetterDelegate() => Utils.MarshalInvoke(GetGetter<int>, MetadataType.RawType);
+
         public class TElement
         {
         }
@@ -960,11 +956,12 @@ namespace Microsoft.ML.Runtime.Api
         {
             var value = (string[])(object)Value;
             var n = Utils.Size(value);
-            dst = new VBuffer<ReadOnlyMemory<char>>(n, Utils.Size(dst.Values) < n ? new ReadOnlyMemory<char>[n] : dst.Values, dst.Indices);
+            var dstEditor = VBufferEditor.Create(ref dst, n);
 
             for (int i = 0; i < n; i++)
-                dst.Values[i] = value[i].AsMemory();
+                dstEditor.Values[i] = value[i].AsMemory();
 
+            dst = dstEditor.Commit();
         }
 
         private ValueGetter<VBuffer<TDst>> GetArrayGetter<TDst>()
@@ -973,9 +970,10 @@ namespace Microsoft.ML.Runtime.Api
             var n = Utils.Size(value);
             return (ref VBuffer<TDst> dst) =>
             {
-                dst = new VBuffer<TDst>(n, Utils.Size(dst.Values) < n ? new TDst[n] : dst.Values, dst.Indices);
+                var dstEditor = VBufferEditor.Create(ref dst, n);
                 if (value != null)
-                    Array.Copy(value, dst.Values, n);
+                    value.AsSpan(0, n).CopyTo(dstEditor.Values);
+                dst = dstEditor.Commit();
             };
         }
 

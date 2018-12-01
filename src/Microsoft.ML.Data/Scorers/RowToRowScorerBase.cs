@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Model;
 
@@ -22,7 +23,7 @@ namespace Microsoft.ML.Runtime.Data
         {
             public readonly ISchemaBoundRowMapper RowMapper;
 
-            protected BindingsBase(ISchema schema, ISchemaBoundRowMapper mapper, string suffix, bool user, params string[] namesDerived)
+            protected BindingsBase(Schema schema, ISchemaBoundRowMapper mapper, string suffix, bool user, params string[] namesDerived)
                 : base(schema, mapper, suffix, user, namesDerived)
             {
                 RowMapper = mapper;
@@ -66,11 +67,6 @@ namespace Microsoft.ML.Runtime.Data
         /// Derived classes provide the specific bindings object.
         /// </summary>
         protected abstract BindingsBase GetBindings();
-
-        public sealed override ISchema Schema
-        {
-            get { return GetBindings(); }
-        }
 
         /// <summary>
         /// Produces the set of active columns for the scorer (as a bool[] of length bindings.ColumnCount),
@@ -118,7 +114,7 @@ namespace Microsoft.ML.Runtime.Data
         /// </summary>
         protected abstract bool WantParallelCursors(Func<int, bool> predicate);
 
-        protected override IRowCursor GetRowCursorCore(Func<int, bool> predicate, IRandom rand = null)
+        protected override IRowCursor GetRowCursorCore(Func<int, bool> predicate, Random rand = null)
         {
             Contracts.AssertValue(predicate);
             Contracts.AssertValueOrNull(rand);
@@ -131,7 +127,7 @@ namespace Microsoft.ML.Runtime.Data
             return new RowCursor(Host, this, input, active, predicateMapper);
         }
 
-        public override IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> predicate, int n, IRandom rand = null)
+        public override IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> predicate, int n, Random rand = null)
         {
             Host.CheckValue(predicate, nameof(predicate));
             Host.CheckValueOrNull(rand);
@@ -219,14 +215,14 @@ namespace Microsoft.ML.Runtime.Data
             return bindings.MapColumnIndex(out isSrc, col);
         }
 
-        protected sealed class RowCursor : SynchronizedCursorBase<IRowCursor>, IRowCursor
+        private sealed class RowCursor : SynchronizedCursorBase<IRowCursor>, IRowCursor
         {
             private readonly BindingsBase _bindings;
             private readonly bool[] _active;
             private readonly Delegate[] _getters;
             private readonly Action _disposer;
 
-            public ISchema Schema => _bindings;
+            public Schema Schema { get; }
 
             public RowCursor(IChannelProvider provider, RowToRowScorerBase parent, IRowCursor input, bool[] active, Func<int, bool> predicateMapper)
                 : base(provider, input)
@@ -236,13 +232,14 @@ namespace Microsoft.ML.Runtime.Data
                 Ch.AssertValue(predicateMapper);
 
                 _bindings = parent.GetBindings();
+                Schema = parent.OutputSchema;
                 Ch.Assert(active.Length == _bindings.ColumnCount);
                 _active = active;
 
                 var output = _bindings.RowMapper.GetRow(input, predicateMapper, out _disposer);
                 try
                 {
-                    Ch.Assert(output.Schema == _bindings.RowMapper.Schema);
+                    Ch.Assert(output.Schema == _bindings.RowMapper.OutputSchema);
                     _getters = parent.GetGetters(output, iinfo => active[_bindings.MapIinfoToCol(iinfo)]);
                 }
                 catch (Exception)
@@ -317,7 +314,7 @@ namespace Microsoft.ML.Runtime.Data
         private readonly uint _crtScoreSet;
         private readonly MetadataUtils.MetadataGetter<uint> _getScoreColumnSetId;
 
-        protected ScorerBindingsBase(ISchema input, ISchemaBoundMapper mapper, string suffix, bool user, params string[] namesDerived)
+        protected ScorerBindingsBase(Schema input, ISchemaBoundMapper mapper, string suffix, bool user, params string[] namesDerived)
             : base(input, user, GetOutputNames(mapper, suffix, namesDerived))
         {
             Contracts.AssertValue(mapper);
@@ -340,7 +337,7 @@ namespace Microsoft.ML.Runtime.Data
             Contracts.AssertValueOrNull(suffix);
             Contracts.AssertValue(namesDerived);
 
-            var schema = mapper.Schema;
+            var schema = mapper.OutputSchema;
             int count = namesDerived.Length + schema.ColumnCount;
             var res = new string[count];
             int dst = 0;
@@ -403,7 +400,7 @@ namespace Microsoft.ML.Runtime.Data
         protected override ColumnType GetColumnTypeCore(int iinfo)
         {
             Contracts.Assert(DerivedColumnCount <= iinfo && iinfo < InfoCount);
-            return Mapper.Schema.GetColumnType(iinfo - DerivedColumnCount);
+            return Mapper.OutputSchema.GetColumnType(iinfo - DerivedColumnCount);
         }
 
         protected override IEnumerable<KeyValuePair<string, ColumnType>> GetMetadataTypesCore(int iinfo)
@@ -413,7 +410,7 @@ namespace Microsoft.ML.Runtime.Data
             yield return MetadataUtils.ScoreColumnSetIdType.GetPair(MetadataUtils.Kinds.ScoreColumnSetId);
             if (iinfo < DerivedColumnCount)
                 yield break;
-            foreach (var pair in Mapper.Schema.GetMetadataTypes(iinfo - DerivedColumnCount))
+            foreach (var pair in Mapper.OutputSchema.GetMetadataTypes(iinfo - DerivedColumnCount))
                 yield return pair;
         }
 
@@ -424,7 +421,7 @@ namespace Microsoft.ML.Runtime.Data
                 return MetadataUtils.ScoreColumnSetIdType;
             if (iinfo < DerivedColumnCount)
                 return null;
-            return Mapper.Schema.GetMetadataTypeOrNull(kind, iinfo - DerivedColumnCount);
+            return Mapper.OutputSchema.GetMetadataTypeOrNull(kind, iinfo - DerivedColumnCount);
         }
 
         protected override void GetMetadataCore<TValue>(string kind, int iinfo, ref TValue value)
@@ -438,7 +435,7 @@ namespace Microsoft.ML.Runtime.Data
                 default:
                     if (iinfo < DerivedColumnCount)
                         throw MetadataUtils.ExceptGetMetadata();
-                    Mapper.Schema.GetMetadata<TValue>(kind, iinfo - DerivedColumnCount, ref value);
+                    Mapper.OutputSchema.GetMetadata<TValue>(kind, iinfo - DerivedColumnCount, ref value);
                     break;
             }
         }
@@ -455,8 +452,8 @@ namespace Microsoft.ML.Runtime.Data
             return
                 col =>
                 {
-                    Contracts.Assert(0 <= col && col < Mapper.Schema.ColumnCount);
-                    return 0 <= col && col < Mapper.Schema.ColumnCount &&
+                    Contracts.Assert(0 <= col && col < Mapper.OutputSchema.ColumnCount);
+                    return 0 <= col && col < Mapper.OutputSchema.ColumnCount &&
                         active[MapIinfoToCol(col + DerivedColumnCount)];
                 };
         }

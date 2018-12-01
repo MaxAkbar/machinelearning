@@ -3,6 +3,7 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.EntryPoints;
@@ -24,7 +25,7 @@ namespace Microsoft.ML.Runtime.Data
 
         public IDataView Source { get; }
 
-        ISchema IRowToRowMapper.InputSchema => Source.Schema;
+        Schema IRowToRowMapper.InputSchema => Source.Schema;
 
         /// <summary>
         /// Creates a NopTransform if the input is not an IDataTransform.
@@ -71,7 +72,7 @@ namespace Microsoft.ML.Runtime.Data
             h.CheckValue(ctx, nameof(ctx));
             h.CheckValue(input, nameof(input));
             ctx.CheckAtModel(GetVersionInfo());
-            return h.Apply("Loading Model", ch => new NopTransform(h, ctx,  input));
+            return h.Apply("Loading Model", ch => new NopTransform(h, ctx, input));
         }
 
         private NopTransform(IHost host, ModelLoadContext ctx, IDataView input)
@@ -101,22 +102,28 @@ namespace Microsoft.ML.Runtime.Data
             get { return Source.CanShuffle; }
         }
 
-        public ISchema Schema
+        /// <summary>
+        /// Explicit implementation prevents Schema from being accessed from derived classes.
+        /// It's our first step to separate data produced by transform from transform.
+        /// </summary>
+        Schema IDataView.Schema => OutputSchema;
+
+        /// <summary>
+        /// Shape information of the produced output. Note that the input and the output of this transform (and their types) are identical.
+        /// </summary>
+        public Schema OutputSchema => Source.Schema;
+
+        public long? GetRowCount()
         {
-            get { return Source.Schema; }
+            return Source.GetRowCount();
         }
 
-        public long? GetRowCount(bool lazy = true)
-        {
-            return Source.GetRowCount(lazy);
-        }
-
-        public IRowCursor GetRowCursor(Func<int, bool> predicate, IRandom rand = null)
+        public IRowCursor GetRowCursor(Func<int, bool> predicate, Random rand = null)
         {
             return Source.GetRowCursor(predicate, rand);
         }
 
-        public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> predicate, int n, IRandom rand = null)
+        public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> predicate, int n, Random rand = null)
         {
             return Source.GetRowCursorSet(out consolidator, predicate, n, rand);
         }

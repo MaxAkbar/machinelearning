@@ -17,7 +17,8 @@ namespace Microsoft.ML.Runtime.Data
     /// <summary>
     /// This holds useful base classes for commands that ingest a primary dataset and deal with associated model files.
     /// </summary>
-    public static class DataCommand
+    [BestFriend]
+    internal static class DataCommand
     {
         public abstract class ArgumentsBase
         {
@@ -56,7 +57,8 @@ namespace Microsoft.ML.Runtime.Data
             public KeyValuePair<string, IComponentFactory<IDataView, IDataTransform>>[] Transform;
         }
 
-        public abstract class ImplBase<TArgs> : ICommand
+        [BestFriend]
+        internal abstract class ImplBase<TArgs> : ICommand
             where TArgs : ArgumentsBase
         {
             protected readonly IHost Host;
@@ -113,7 +115,6 @@ namespace Microsoft.ML.Runtime.Data
                 using (var pipe = prov.StartPipe<TelemetryMessage>("TelemetryPipe"))
                 {
                     SendTelemetryCore(pipe);
-                    pipe.Done();
                 }
             }
 
@@ -150,7 +151,6 @@ namespace Microsoft.ML.Runtime.Data
                         foreach (var pair in averageMetric)
                             pipe.Send(TelemetryMessage.CreateMetric(pair.Key, pair.Value, null));
                     }
-                    pipe.Done();
                 }
             }
 
@@ -163,7 +163,7 @@ namespace Microsoft.ML.Runtime.Data
                     {
                         while (cursor.MoveNext())
                         {
-                            for (int currentIndex = 0; currentIndex < cursor.Schema.ColumnCount; currentIndex++)
+                            for (int currentIndex = 0; currentIndex < cursor.Schema.Count; currentIndex++)
                             {
                                 var nameOfMetric = "TLC_" + cursor.Schema.GetColumnName(currentIndex);
                                 var type = cursor.Schema.GetColumnType(currentIndex);

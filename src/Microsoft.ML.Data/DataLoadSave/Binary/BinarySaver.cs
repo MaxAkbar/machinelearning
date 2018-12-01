@@ -63,7 +63,7 @@ namespace Microsoft.ML.Runtime.Data.IO
         /// This is a simple struct to associate a source index with a codec, without having to have
         /// parallel structures everywhere.
         /// </summary>
-        private struct ColumnCodec
+        private readonly struct ColumnCodec
         {
             public readonly int SourceIndex;
             public readonly IValueCodec Codec;
@@ -129,7 +129,7 @@ namespace Microsoft.ML.Runtime.Data.IO
             {
                 Contracts.Assert(_writer != null);
                 _getter(ref _value);
-                _writer.Write(ref _value);
+                _writer.Write(in _value);
             }
 
             public override MemoryStream EndBlock()
@@ -149,7 +149,7 @@ namespace Microsoft.ML.Runtime.Data.IO
         /// also have a dual usage if <see cref="Exception"/> is non-null of indicating
         /// a source worker threw an exception.
         /// </summary>
-        private struct Block
+        private readonly struct Block
         {
             /// <summary>
             /// Take one guess.
@@ -362,7 +362,7 @@ namespace Microsoft.ML.Runtime.Data.IO
             MemoryStream uncompressedMem = _memPool.Get();
             using (IValueWriter<T> writer = codec.OpenWriter(uncompressedMem))
             {
-                writer.Write(ref value);
+                writer.Write(in value);
                 writer.Commit();
             }
             MemoryStream compressedMem = _memPool.Get();
@@ -519,7 +519,7 @@ namespace Microsoft.ML.Runtime.Data.IO
                                 expectedPosition++;
                                 // REVIEW: Right now the number of rows per block is fixed, so we
                                 // write the same value each time. In some future state, it may be that this
-                                // is relaxed, with possibly some tradeoffs (e.g., inability to randomly seek).
+                                // is relaxed, with possibly some tradeoffs (for example, inability to randomly seek).
                                 writer.WriteLeb128Int((ulong)rowsPerBlock);
                                 expectedPosition += Utils.Leb128IntLength((uint)rowsPerBlock);
                                 // Offset of the lookup table.
@@ -555,8 +555,6 @@ namespace Microsoft.ML.Runtime.Data.IO
                         writer.Seek(0, SeekOrigin.Begin);
                         writer.Write(headerBytes);
                     }
-
-                    ch.Done();
                 }
             }
             catch (Exception ex)
@@ -704,7 +702,6 @@ namespace Microsoft.ML.Runtime.Data.IO
                 exMarshaller.ThrowIfSet(ch);
                 if (!_silent)
                     ch.Info("Wrote {0} rows across {1} columns in {2}", _rowCount, activeColumns.Length, sw.Elapsed);
-                ch.Done();
                 // When we dispose the exception marshaller, this will set the cancellation token when we internally
                 // dispose the cancellation token source, so one way or another those threads are being cancelled, even
                 // if an exception is thrown in the main body of this function.
@@ -744,7 +741,7 @@ namespace Microsoft.ML.Runtime.Data.IO
 
             // First get the cursor.
             HashSet<int> active = new HashSet<int>(actives.Select(cc => cc.SourceIndex));
-            IRandom rand = data.CanShuffle ? new TauswortheHybrid(_host.Rand) : null;
+            Random rand = data.CanShuffle ? new TauswortheHybrid(_host.Rand) : null;
             // Get the estimators.
             EstimatorDelegate del = EstimatorCore<int>;
             MethodInfo methInfo = del.GetMethodInfo().GetGenericMethodDefinition();
@@ -794,7 +791,7 @@ namespace Microsoft.ML.Runtime.Data.IO
             fetchWriteEstimator = () =>
             {
                 getter(ref val);
-                specificWriter.Write(ref val);
+                specificWriter.Write(in val);
                 return specificWriter.GetCommitLengthEstimate();
             };
         }
@@ -870,7 +867,7 @@ namespace Microsoft.ML.Runtime.Data.IO
 
             using (var writer = codecT.OpenWriter(stream))
             {
-                writer.Write(ref value);
+                writer.Write(in value);
                 bytesWritten += (int)writer.GetCommitLengthEstimate();
                 writer.Commit();
             }

@@ -4,17 +4,20 @@
 
 using System;
 using System.Collections.Generic;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime.Internal.Utilities;
 
 namespace Microsoft.ML.Runtime.Data
 {
     /// <summary>
     /// A convenience class for concatenating several schemas together.
-    /// This would be necessary when combining IDataViews through any type of combining operation, e.g. zip.
+    /// This would be necessary when combining IDataViews through any type of combining operation, for example, zip.
     /// </summary>
     internal sealed class CompositeSchema : ISchema
     {
         private readonly ISchema[] _sources;
+
+        public Schema AsSchema { get; }
 
         // Zero followed by cumulative column counts. Zero being used for the empty case.
         private readonly int[] _cumulativeColCounts;
@@ -31,6 +34,7 @@ namespace Microsoft.ML.Runtime.Data
                 var schema = sources[i];
                 _cumulativeColCounts[i + 1] = _cumulativeColCounts[i] + schema.ColumnCount;
             }
+            AsSchema = Schema.Create(this);
         }
 
         public int ColumnCount => _cumulativeColCounts[_cumulativeColCounts.Length - 1];
@@ -64,7 +68,7 @@ namespace Microsoft.ML.Runtime.Data
         public void GetColumnSource(int col, out int srcIndex, out int srcCol)
         {
             CheckColumnInRange(col);
-            if (!_cumulativeColCounts.TryFindIndexSorted(0, _cumulativeColCounts.Length, col, out srcIndex))
+            if (!Utils.TryFindIndexSorted(_cumulativeColCounts, 0, _cumulativeColCounts.Length, col, out srcIndex))
                 srcIndex--;
             Contracts.Assert(0 <= srcIndex && srcIndex < _cumulativeColCounts.Length);
             srcCol = col - _cumulativeColCounts[srcIndex];

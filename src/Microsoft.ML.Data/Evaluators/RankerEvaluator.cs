@@ -9,6 +9,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
@@ -41,17 +42,17 @@ namespace Microsoft.ML.Runtime.Data
             public bool OutputGroupSummary;
         }
 
-        public const string LoadName = "RankingEvaluator";
+        internal const string LoadName = "RankingEvaluator";
 
         public const string Ndcg = "NDCG";
         public const string Dcg = "DCG";
         public const string MaxDcg = "MaxDCG";
 
-        /// <summary>
+        /// <value>
         /// The ranking evaluator outputs a data view by this name, which contains metrics aggregated per group.
         /// It contains four columns: GroupId, NDCG, DCG and MaxDCG. Each row in the data view corresponds to one
         /// group in the scored data.
-        /// </summary>
+        /// </value>
         public const string GroupSummary = "GroupSummary";
 
         private const string GroupId = "GroupId";
@@ -232,6 +233,40 @@ namespace Microsoft.ML.Runtime.Data
                         result.Add(GroupSummary, groupDvBldr.GetDataView());
                     return result;
                 };
+        }
+
+        /// <summary>
+        /// Evaluates scored regression data.
+        /// </summary>
+        /// <param name="data">The data to evaluate.</param>
+        /// <param name="label">The name of the label column.</param>
+        /// <param name="groupId">The name of the groupId column.</param>
+        /// <param name="score">The name of the predicted score column.</param>
+        /// <returns>The evaluation metrics for these outputs.</returns>
+        public RankerMetrics Evaluate(IDataView data, string label, string groupId, string score)
+        {
+            Host.CheckValue(data, nameof(data));
+            Host.CheckNonEmpty(label, nameof(label));
+            Host.CheckNonEmpty(score, nameof(score));
+            var roles = new RoleMappedData(data, opt: false,
+                RoleMappedSchema.ColumnRole.Label.Bind(label),
+                RoleMappedSchema.ColumnRole.Group.Bind(groupId),
+                RoleMappedSchema.CreatePair(MetadataUtils.Const.ScoreValueKind.Score, score));
+
+            var resultDict = Evaluate(roles);
+            Host.Assert(resultDict.ContainsKey(MetricKinds.OverallMetrics));
+            var overall = resultDict[MetricKinds.OverallMetrics];
+
+            RankerMetrics result;
+            using (var cursor = overall.GetRowCursor(i => true))
+            {
+                var moved = cursor.MoveNext();
+                Host.Assert(moved);
+                result = new RankerMetrics(Host, cursor);
+                moved = cursor.MoveNext();
+                Host.Assert(!moved);
+            }
+            return result;
         }
 
         public sealed class Aggregator : AggregatorBase
@@ -488,25 +523,19 @@ namespace Microsoft.ML.Runtime.Data
                 return
                     (ref VBuffer<ReadOnlyMemory<char>> dst) =>
                     {
-                        var values = dst.Values;
-                        if (Utils.Size(values) < UnweightedCounters.TruncationLevel)
-                            values = new ReadOnlyMemory<char>[UnweightedCounters.TruncationLevel];
-
+                        var editor = VBufferEditor.Create(ref dst, UnweightedCounters.TruncationLevel);
                         for (int i = 0; i < UnweightedCounters.TruncationLevel; i++)
-                            values[i] = string.Format("{0}@{1}", prefix, i + 1).AsMemory();
-                        dst = new VBuffer<ReadOnlyMemory<char>>(UnweightedCounters.TruncationLevel, values);
+                            editor.Values[i] = string.Format("{0}@{1}", prefix, i + 1).AsMemory();
+                        dst = editor.Commit();
                     };
             }
 
             public void GetSlotNames(ref VBuffer<ReadOnlyMemory<char>> slotNames)
             {
-                var values = slotNames.Values;
-                if (Utils.Size(values) < UnweightedCounters.TruncationLevel)
-                    values = new ReadOnlyMemory<char>[UnweightedCounters.TruncationLevel];
-
+                var editor = VBufferEditor.Create(ref slotNames, UnweightedCounters.TruncationLevel);
                 for (int i = 0; i < UnweightedCounters.TruncationLevel; i++)
-                    values[i] = string.Format("@{0}", i + 1).AsMemory();
-                slotNames = new VBuffer<ReadOnlyMemory<char>>(UnweightedCounters.TruncationLevel, values);
+                    editor.Values[i] = string.Format("@{0}", i + 1).AsMemory();
+                slotNames = editor.Commit();
             }
         }
     }
@@ -537,7 +566,16 @@ namespace Microsoft.ML.Runtime.Data
 
         public bool CanShuffle { get { return _transform.CanShuffle; } }
 
-        public ISchema Schema { get { return _transform.Schema; } }
+        /// <summary>
+        /// Explicit implementation prevents Schema from being accessed from derived classes.
+        /// It's our first step to separate data produced by transform from transform.
+        /// </summary>
+        Schema IDataView.Schema => OutputSchema;
+
+        /// <summary>
+        /// Shape information of the produced output. Note that the input and the output of this transform (and their types) are identical.
+        /// </summary>
+        public Schema OutputSchema => _transform.OutputSchema;
 
         public RankerPerInstanceTransform(IHostEnvironment env, IDataView input, string labelCol, string scoreCol, string groupCol,
                 int truncationLevel, Double[] labelGains)
@@ -567,17 +605,17 @@ namespace Microsoft.ML.Runtime.Data
             _transform.Save(ctx);
         }
 
-        public long? GetRowCount(bool lazy = true)
+        public long? GetRowCount()
         {
-            return _transform.GetRowCount(lazy);
+            return _transform.GetRowCount();
         }
 
-        public IRowCursor GetRowCursor(Func<int, bool> needCol, IRandom rand = null)
+        public IRowCursor GetRowCursor(Func<int, bool> needCol, Random rand = null)
         {
             return _transform.GetRowCursor(needCol, rand);
         }
 
-        public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> needCol, int n, IRandom rand = null)
+        public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> needCol, int n, Random rand = null)
         {
             return _transform.GetRowCursorSet(out consolidator, needCol, n, rand);
         }
@@ -637,14 +675,12 @@ namespace Microsoft.ML.Runtime.Data
                 private void SlotNamesGetter(int iinfo, ref VBuffer<ReadOnlyMemory<char>> dst)
                 {
                     Contracts.Assert(0 <= iinfo && iinfo < InfoCount);
-                    var values = dst.Values;
-                    if (Utils.Size(values) < _truncationLevel)
-                        values = new ReadOnlyMemory<char>[_truncationLevel];
+                    var editor = VBufferEditor.Create(ref dst, _truncationLevel);
                     for (int i = 0; i < _truncationLevel; i++)
-                        values[i] =
+                        editor.Values[i] =
                             string.Format("{0}@{1}", iinfo == NdcgCol ? Ndcg : iinfo == DcgCol ? Dcg : MaxDcg,
                                 i + 1).AsMemory();
-                    dst = new VBuffer<ReadOnlyMemory<char>>(_truncationLevel, values);
+                    dst = editor.Commit();
                 }
             }
 
@@ -734,11 +770,9 @@ namespace Microsoft.ML.Runtime.Data
             private void Copy(Double[] src, ref VBuffer<Double> dst)
             {
                 Host.AssertValue(src);
-                var values = dst.Values;
-                if (Utils.Size(values) < src.Length)
-                    values = new Double[src.Length];
-                src.CopyTo(values, 0);
-                dst = new VBuffer<Double>(src.Length, values);
+                var editor = VBufferEditor.Create(ref dst, src.Length);
+                src.CopyTo(editor.Values);
+                dst = editor.Commit();
             }
 
             protected override ValueGetter<short> GetLabelGetter(IRow row)
@@ -870,7 +904,6 @@ namespace Microsoft.ML.Runtime.Data
                 // will be present, and drop them.
                 gs = MetricWriter.GetNonStratifiedMetrics(Host, gs);
                 MetricWriter.SavePerInstance(Host, ch, _groupSummaryFilename, gs);
-                ch.Done();
             }
         }
 

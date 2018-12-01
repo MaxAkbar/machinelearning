@@ -12,6 +12,10 @@ using Microsoft.ML.Runtime.Training;
 using Newtonsoft.Json.Linq;
 
 [assembly: LoadableClass(typeof(void), typeof(OneVersusAllMacro), null, typeof(SignatureEntryPointModule), "OneVersusAllMacro")]
+
+// The warning #612 is disabled because the following code uses Legacy.Models and Legacy.Transforms while Legacy is marked as obsolete.
+// Because that dependency will be removed form ML.NET, one needs to rewrite all places where legacy APIs are used.
+#pragma warning disable 612
 namespace Microsoft.ML.Runtime.EntryPoints
 {
     /// <summary>
@@ -66,12 +70,12 @@ namespace Microsoft.ML.Runtime.EntryPoints
             };
             var exp = new Experiment(env);
             var remapperOutNode = exp.Add(remapper);
-            var subNodes = EntryPointNode.ValidateNodes(env, node.Context, exp.GetNodes(), node.Catalog);
+            var subNodes = EntryPointNode.ValidateNodes(env, node.Context, exp.GetNodes());
             macroNodes.AddRange(subNodes);
 
             // Parse the nodes in input.Nodes into a temporary run context.
             var subGraphRunContext = new RunContext(env);
-            var subGraphNodes = EntryPointNode.ValidateNodes(env, subGraphRunContext, input.Nodes, node.Catalog);
+            var subGraphNodes = EntryPointNode.ValidateNodes(env, subGraphRunContext, input.Nodes);
 
             // Rename all the variables such that they don't conflict with the ones in the outer run context.
             var mapping = new Dictionary<string, string>();
@@ -187,10 +191,11 @@ namespace Microsoft.ML.Runtime.EntryPoints
 
             // Add nodes to main experiment.
             var nodes = macroExperiment.GetNodes();
-            var expNodes = EntryPointNode.ValidateNodes(env, node.Context, nodes, node.Catalog);
+            var expNodes = EntryPointNode.ValidateNodes(env, node.Context, nodes);
             macroNodes.AddRange(expNodes);
 
             return new CommonOutputs.MacroOutput<Output>() { Nodes = macroNodes };
         }
     }
+#pragma warning restore 612
 }

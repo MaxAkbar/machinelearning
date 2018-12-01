@@ -12,21 +12,23 @@ using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Ensemble;
 using Microsoft.ML.Runtime.Ensemble.OutputCombiners;
 using Microsoft.ML.Runtime.Ensemble.Selector;
-using Microsoft.ML.Runtime.EntryPoints;
 using Microsoft.ML.Runtime.Internal.Internallearn;
-using Microsoft.ML.Runtime.Learners;
+using Microsoft.ML.Trainers.Online;
 
 [assembly: LoadableClass(typeof(RegressionEnsembleTrainer), typeof(RegressionEnsembleTrainer.Arguments),
     new[] { typeof(SignatureRegressorTrainer), typeof(SignatureTrainer) },
     RegressionEnsembleTrainer.UserNameValue,
     RegressionEnsembleTrainer.LoadNameValue)]
 
+[assembly: LoadableClass(typeof(RegressionEnsembleTrainer), typeof(RegressionEnsembleTrainer.Arguments), typeof(SignatureModelCombiner),
+    "Regression Ensemble Model Combiner", RegressionEnsembleTrainer.LoadNameValue)]
+
 namespace Microsoft.ML.Runtime.Ensemble
 {
     using TScalarPredictor = IPredictorProducing<Single>;
-    public sealed class RegressionEnsembleTrainer : EnsembleTrainerBase<Single, TScalarPredictor,
+    internal sealed class RegressionEnsembleTrainer : EnsembleTrainerBase<Single, TScalarPredictor,
        IRegressionSubModelSelector, IRegressionOutputCombiner>,
-       IModelCombiner<TScalarPredictor, TScalarPredictor>
+       IModelCombiner
     {
         public const string LoadNameValue = "EnsembleRegression";
         public const string UserNameValue = "Regression Ensemble (bagging, stacking, etc)";
@@ -41,6 +43,7 @@ namespace Microsoft.ML.Runtime.Ensemble
             [TGUI(Label = "Output combiner", Description = "Output combiner type")]
             public ISupportRegressionOutputCombinerFactory OutputCombiner = new MedianFactory();
 
+            // REVIEW: If we make this public again it should be an *estimator* of this type of predictor, rather than the (deprecated) ITrainer.
             [Argument(ArgumentType.Multiple, HelpText = "Base predictor type", ShortName = "bp,basePredictorTypes", SortOrder = 1, Visibility = ArgumentAttribute.VisibilityType.CmdLineOnly, SignatureType = typeof(SignatureRegressorTrainer))]
             public IComponentFactory<ITrainer<TScalarPredictor>>[] BasePredictors;
 
@@ -51,7 +54,7 @@ namespace Microsoft.ML.Runtime.Ensemble
                 BasePredictors = new[]
                 {
                     ComponentFactoryUtils.CreateFromFunction(
-                        env => new OnlineGradientDescentTrainer(env, new OnlineGradientDescentTrainer.Arguments()))
+                        env => new OnlineGradientDescentTrainer(env, DefaultColumnNames.Label, DefaultColumnNames.Features))
                 };
             }
         }
@@ -66,6 +69,12 @@ namespace Microsoft.ML.Runtime.Ensemble
             Combiner = args.OutputCombiner.CreateComponent(Host);
         }
 
+        private RegressionEnsembleTrainer(IHostEnvironment env, Arguments args, PredictionKind predictionKind)
+            : this(env, args)
+        {
+            Host.CheckParam(predictionKind == PredictionKind.Regression, nameof(PredictionKind));
+        }
+
         public override PredictionKind PredictionKind => PredictionKind.Regression;
 
         private protected override TScalarPredictor CreatePredictor(List<FeatureSubsetModel<TScalarPredictor>> models)
@@ -73,13 +82,16 @@ namespace Microsoft.ML.Runtime.Ensemble
             return new EnsemblePredictor(Host, PredictionKind, CreateModels<TScalarPredictor>(models), Combiner);
         }
 
-        public TScalarPredictor CombineModels(IEnumerable<TScalarPredictor> models)
+        public IPredictor CombineModels(IEnumerable<IPredictor> models)
         {
+            Host.CheckValue(models, nameof(models));
+            Host.CheckParam(models.All(m => m is TScalarPredictor), nameof(models));
+
             var combiner = _outputCombiner.CreateComponent(Host);
             var p = models.First();
 
             var predictor = new EnsemblePredictor(Host, p.PredictionKind,
-                    models.Select(k => new FeatureSubsetModel<TScalarPredictor>(k)).ToArray(), combiner);
+                    models.Select(k => new FeatureSubsetModel<TScalarPredictor>((TScalarPredictor)k)).ToArray(), combiner);
 
             return predictor;
         }

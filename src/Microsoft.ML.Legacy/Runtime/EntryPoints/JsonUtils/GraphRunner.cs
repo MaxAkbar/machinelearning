@@ -3,7 +3,6 @@
 // See the LICENSE file in the project root for more information.
 
 using System.Linq;
-using Microsoft.ML.Runtime.Internal.Utilities;
 using Newtonsoft.Json.Linq;
 
 namespace Microsoft.ML.Runtime.EntryPoints.JsonUtils
@@ -23,14 +22,13 @@ namespace Microsoft.ML.Runtime.EntryPoints.JsonUtils
         private readonly IHost _host;
         private readonly EntryPointGraph _graph;
 
-        public GraphRunner(IHostEnvironment env, ComponentCatalog catalog, JArray nodes)
+        public GraphRunner(IHostEnvironment env, JArray nodes)
         {
             Contracts.CheckValue(env, nameof(env));
             _host = env.Register(RegistrationName);
-            _host.CheckValue(catalog, nameof(catalog));
             _host.CheckValue(nodes, nameof(nodes));
 
-            _graph = new EntryPointGraph(_host, catalog, nodes);
+            _graph = new EntryPointGraph(_host, nodes);
         }
 
         public GraphRunner(IHostEnvironment env, EntryPointGraph graph)
@@ -141,7 +139,7 @@ namespace Microsoft.ML.Runtime.EntryPoints.JsonUtils
         /// <summary>
         /// Get the data kind of a particular port.
         /// </summary>
-        public TlcModule.DataKind GetPortDataKind(string name)
+        internal TlcModule.DataKind GetPortDataKind(string name)
         {
             _host.CheckNonEmpty(name, nameof(name));
             EntryPointVariable variable;

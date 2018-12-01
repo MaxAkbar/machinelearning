@@ -2,17 +2,17 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Float = System.Single;
-
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Internal.Utilities;
 using Microsoft.ML.Runtime.Model;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using Float = System.Single;
 
 [assembly: LoadableClass(typeof(IDataLoader), typeof(CompositeDataLoader), typeof(CompositeDataLoader.Arguments), typeof(SignatureDataLoader),
     "Composite Data Loader", "CompositeDataLoader", "Composite", "PipeData", "Pipe", "PipeDataLoader")]
@@ -40,7 +40,7 @@ namespace Microsoft.ML.Runtime.Data
             public KeyValuePair<string, IComponentFactory<IDataView, IDataTransform>>[] Transform;
         }
 
-        private struct TransformEx
+        private readonly struct TransformEx
         {
             public readonly string Tag;
             public readonly string ArgsString;
@@ -153,8 +153,6 @@ namespace Microsoft.ML.Runtime.Data
                         if (!string.IsNullOrEmpty(pair.Key) && composite._transforms.Any(x => x.Tag == pair.Key))
                             ch.Warning("The transform with tag '{0}' already exists in the chain", pair.Key);
                     }
-
-                    ch.Done();
                 }
             }
 
@@ -265,8 +263,6 @@ namespace Microsoft.ML.Runtime.Data
 
                     view = newDataView;
                 }
-
-                ch.Done();
             }
 
             return view == srcView ? srcLoader : new CompositeDataLoader(host, exes.ToArray());
@@ -312,9 +308,7 @@ namespace Microsoft.ML.Runtime.Data
 
                 // Now the transforms.
                 h.Assert(!(loader is CompositeDataLoader));
-                var result = LoadTransforms(ctx, loader, h, x => true);
-                ch.Done();
-                return result;
+                return LoadTransforms(ctx, loader, h, x => true);
             }
         }
 
@@ -364,7 +358,6 @@ namespace Microsoft.ML.Runtime.Data
                 using (var ch = h.Start("ModelCheck"))
                 {
                     ch.Info("The data model doesn't contain transforms.");
-                    ch.Done();
                 }
                 return srcView;
             }
@@ -564,18 +557,18 @@ namespace Microsoft.ML.Runtime.Data
             return string.Format("xf{0:00}", index);
         }
 
-        public long? GetRowCount(bool lazy = true)
+        public long? GetRowCount()
         {
-            return View.GetRowCount(lazy);
+            return View.GetRowCount();
         }
 
         public bool CanShuffle => View.CanShuffle;
 
-        public ISchema Schema => View.Schema;
+        public Schema Schema => View.Schema;
 
         public ITransposeSchema TransposeSchema { get; }
 
-        public IRowCursor GetRowCursor(Func<int, bool> predicate, IRandom rand = null)
+        public IRowCursor GetRowCursor(Func<int, bool> predicate, Random rand = null)
         {
             _host.CheckValue(predicate, nameof(predicate));
             _host.CheckValueOrNull(rand);
@@ -583,7 +576,7 @@ namespace Microsoft.ML.Runtime.Data
         }
 
         public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator,
-            Func<int, bool> predicate, int n, IRandom rand = null)
+            Func<int, bool> predicate, int n, Random rand = null)
         {
             _host.CheckValue(predicate, nameof(predicate));
             _host.CheckValueOrNull(rand);

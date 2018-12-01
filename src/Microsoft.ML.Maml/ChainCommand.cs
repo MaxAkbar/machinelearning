@@ -15,7 +15,8 @@ namespace Microsoft.ML.Runtime.Tools
 {
     using Stopwatch = System.Diagnostics.Stopwatch;
 
-    public sealed class ChainCommand : ICommand
+    [BestFriend]
+    internal sealed class ChainCommand : ICommand
     {
         public sealed class Arguments
         {
@@ -65,8 +66,6 @@ namespace Microsoft.ML.Runtime.Tools
                             count++;
 
                             chCmd.Info(" ");
-
-                            chCmd.Done();
                         }
                     }
                 }
@@ -75,8 +74,6 @@ namespace Microsoft.ML.Runtime.Tools
                 ch.Info("=====================================================================================");
                 ch.Info("Executed {0} commands in {1}", count, sw.Elapsed);
                 ch.Info("=====================================================================================");
-
-                ch.Done();
             }
         }
     }

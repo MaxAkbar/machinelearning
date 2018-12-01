@@ -2,17 +2,16 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Internal.Utilities;
+using System;
+using System.Linq;
 
 namespace Microsoft.ML.Runtime.EntryPoints
 {
-    public static class EntryPointUtils
+    [BestFriend]
+    internal static class EntryPointUtils
     {
         private static bool IsValueWithinRange<T>(TlcModule.RangeAttribute range, object obj)
         {
@@ -101,7 +100,7 @@ namespace Microsoft.ML.Runtime.EntryPoints
         /// and the column name was explicitly specified. If the column is not found
         /// and the column name was not explicitly specified, it returns null.
         /// </summary>
-        public static string FindColumnOrNull(IExceptionContext ectx, ISchema schema, Optional<string> value)
+        public static string FindColumnOrNull(IExceptionContext ectx, Schema schema, Optional<string> value)
         {
             Contracts.CheckValueOrNull(ectx);
             ectx.CheckValue(schema, nameof(schema));
@@ -109,8 +108,7 @@ namespace Microsoft.ML.Runtime.EntryPoints
 
             if (value == "")
                 return null;
-            int col;
-            if (!schema.TryGetColumnIndex(value, out col))
+            if (schema.GetColumnOrNull(value) == null)
             {
                 if (value.IsExplicit)
                     throw ectx.Except("Column '{0}' not found", value);

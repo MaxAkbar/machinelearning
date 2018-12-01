@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
@@ -13,6 +14,7 @@ using Microsoft.ML.Runtime.Data.Conversion;
 using Microsoft.ML.Runtime.EntryPoints;
 using Microsoft.ML.Runtime.Internal.Utilities;
 using Microsoft.ML.Runtime.Model;
+using Microsoft.ML.Transforms;
 
 [assembly: LoadableClass(UngroupTransform.Summary, typeof(UngroupTransform), typeof(UngroupTransform.Arguments), typeof(SignatureDataTransform),
     UngroupTransform.UserName, UngroupTransform.ShortName)]
@@ -20,7 +22,7 @@ using Microsoft.ML.Runtime.Model;
 [assembly: LoadableClass(UngroupTransform.Summary, typeof(UngroupTransform), null, typeof(SignatureLoadDataTransform),
     UngroupTransform.UserName, UngroupTransform.LoaderSignature)]
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Transforms
 {
 
     // This can be thought of as an inverse of GroupTransform. For all specified vector columns
@@ -95,7 +97,7 @@ namespace Microsoft.ML.Runtime.Data
         private readonly SchemaImpl _schemaImpl;
 
         /// <summary>
-        /// Convenience constructor for public facing API.
+        /// Initializes a new instance of <see cref="UngroupTransform"/>.
         /// </summary>
         /// <param name="env">Host Environment.</param>
         /// <param name="input">Input <see cref="IDataView"/>. This is the output from previous transform or loader.</param>
@@ -148,23 +150,20 @@ namespace Microsoft.ML.Runtime.Data
             _schemaImpl.Save(ctx);
         }
 
-        public override long? GetRowCount(bool lazy = true)
+        public override long? GetRowCount()
         {
             // Row count is known if the input's row count is known, and pivot column sizes are fixed.
             var commonSize = _schemaImpl.GetCommonPivotColumnSize();
             if (commonSize > 0)
             {
-                long? srcRowCount = Source.GetRowCount(true);
+                long? srcRowCount = Source.GetRowCount();
                 if (srcRowCount.HasValue && srcRowCount.Value <= (long.MaxValue / commonSize))
                     return srcRowCount.Value * commonSize;
             }
             return null;
         }
 
-        public override ISchema Schema
-        {
-            get { return _schemaImpl; }
-        }
+        public override Schema OutputSchema => _schemaImpl.AsSchema;
 
         protected override bool? ShouldUseParallelCursors(Func<int, bool> predicate)
         {
@@ -180,7 +179,7 @@ namespace Microsoft.ML.Runtime.Data
             get { return false; }
         }
 
-        protected override IRowCursor GetRowCursorCore(Func<int, bool> predicate, IRandom rand = null)
+        protected override IRowCursor GetRowCursorCore(Func<int, bool> predicate, Random rand = null)
         {
             var activeInput = _schemaImpl.GetActiveInput(predicate);
             var inputCursor = Source.GetRowCursor(col => activeInput[col], null);
@@ -188,7 +187,7 @@ namespace Microsoft.ML.Runtime.Data
         }
 
         public override IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> predicate,
-            int n, IRandom rand = null)
+            int n, Random rand = null)
         {
             var activeInput = _schemaImpl.GetActiveInput(predicate);
             var inputCursors = Source.GetRowCursorSet(out consolidator, col => activeInput[col], n, null);
@@ -207,7 +206,6 @@ namespace Microsoft.ML.Runtime.Data
                 case MetadataUtils.Kinds.ScoreColumnSetId:
                 case MetadataUtils.Kinds.ScoreColumnKind:
                 case MetadataUtils.Kinds.ScoreValueKind:
-                case MetadataUtils.Kinds.HasMissingValues:
                 case MetadataUtils.Kinds.IsUserVisible:
                     return true;
                 default:
@@ -215,7 +213,7 @@ namespace Microsoft.ML.Runtime.Data
                 }
             }
 
-            public struct PivotColumnInfo
+            public readonly struct PivotColumnInfo
             {
                 public readonly string Name;
                 public readonly int Index;
@@ -235,7 +233,7 @@ namespace Microsoft.ML.Runtime.Data
                 }
             }
 
-            private readonly ISchema _inputSchema;
+            private readonly Schema _inputSchema;
             private readonly IExceptionContext _ectx;
 
             public readonly UngroupMode Mode;
@@ -246,7 +244,9 @@ namespace Microsoft.ML.Runtime.Data
             // pivotIndex[col] = -1 for non-pivot columns, and the index of the corresponding info in _infos for pivot columns.
             private readonly int[] _pivotIndex;
 
-            public SchemaImpl(IExceptionContext ectx, ISchema inputSchema, UngroupMode mode, string[] pivotColumns)
+            public Schema AsSchema { get; }
+
+            public SchemaImpl(IExceptionContext ectx, Schema inputSchema, UngroupMode mode, string[] pivotColumns)
             {
                 Contracts.AssertValueOrNull(ectx);
                 _ectx = ectx;
@@ -267,6 +267,8 @@ namespace Microsoft.ML.Runtime.Data
                     _ectx.Assert(_pivotIndex[info.Index] == -1);
                     _pivotIndex[info.Index] = i;
                 }
+
+                AsSchema = Schema.Create(this);
             }
 
             private static void CheckAndBind(IExceptionContext ectx, ISchema inputSchema,
@@ -293,7 +295,7 @@ namespace Microsoft.ML.Runtime.Data
                 }
             }
 
-            public static SchemaImpl Create(ModelLoadContext ctx, IExceptionContext ectx, ISchema inputSchema)
+            public static SchemaImpl Create(ModelLoadContext ctx, IExceptionContext ectx, Schema inputSchema)
             {
                 Contracts.AssertValueOrNull(ectx);
                 ectx.AssertValue(ctx);
@@ -441,7 +443,7 @@ namespace Microsoft.ML.Runtime.Data
 
         private sealed class Cursor : LinkedRootCursorBase<IRowCursor>, IRowCursor
         {
-            private readonly SchemaImpl _schema;
+            private readonly SchemaImpl _schemaImpl;
 
             // The size of the pivot column in the current row. If the cursor is in good state, this is positive.
             // It's calculated on every row, based on UngroupMode.
@@ -468,24 +470,24 @@ namespace Microsoft.ML.Runtime.Data
             public Cursor(IChannelProvider provider, IRowCursor input, SchemaImpl schema, Func<int, bool> predicate)
                 : base(provider, input)
             {
-                _schema = schema;
-                _active = Utils.BuildArray(_schema.ColumnCount, predicate);
-                _cachedGetters = new Delegate[_schema.ColumnCount];
-                _colSizes = new int[_schema.ColumnCount];
+                _schemaImpl = schema;
+                _active = Utils.BuildArray(_schemaImpl.ColumnCount, predicate);
+                _cachedGetters = new Delegate[_schemaImpl.ColumnCount];
+                _colSizes = new int[_schemaImpl.ColumnCount];
 
-                int sizeColumnsLim = _schema.Mode == UngroupMode.First ? 1 : _schema.PivotColumnCount;
+                int sizeColumnsLim = _schemaImpl.Mode == UngroupMode.First ? 1 : _schemaImpl.PivotColumnCount;
                 _fixedSize = 0;
                 var needed = new List<Func<int>>();
                 for (int i = 0; i < sizeColumnsLim; i++)
                 {
-                    var info = _schema.GetPivotColumnInfo(i);
+                    var info = _schemaImpl.GetPivotColumnInfo(i);
                     if (info.Size > 0)
                     {
                         if (_fixedSize == 0)
                             _fixedSize = info.Size;
-                        else if (_schema.Mode == UngroupMode.Inner && _fixedSize > info.Size)
+                        else if (_schemaImpl.Mode == UngroupMode.Inner && _fixedSize > info.Size)
                             _fixedSize = info.Size;
-                        else if (_schema.Mode == UngroupMode.Outer && _fixedSize < info.Size)
+                        else if (_schemaImpl.Mode == UngroupMode.Outer && _fixedSize < info.Size)
                             _fixedSize = info.Size;
                     }
                     else
@@ -550,14 +552,14 @@ namespace Microsoft.ML.Runtime.Data
                 foreach (var getter in _sizeGetters)
                 {
                     var colSize = getter();
-                    if (_schema.Mode == UngroupMode.Inner && colSize == 0)
+                    if (_schemaImpl.Mode == UngroupMode.Inner && colSize == 0)
                         return 0;
 
                     if (size == 0)
                         size = colSize;
-                    else if (_schema.Mode == UngroupMode.Inner && size > colSize)
+                    else if (_schemaImpl.Mode == UngroupMode.Inner && size > colSize)
                         size = colSize;
-                    else if (_schema.Mode == UngroupMode.Outer && size < colSize)
+                    else if (_schemaImpl.Mode == UngroupMode.Outer && size < colSize)
                         size = colSize;
                 }
 
@@ -566,7 +568,7 @@ namespace Microsoft.ML.Runtime.Data
 
             private Func<int> MakeSizeGetter<T>(int col)
             {
-                Contracts.Assert(0 <= col && col < _schema.ColumnCount);
+                Contracts.Assert(0 <= col && col < _schemaImpl.ColumnCount);
 
                 var srcGetter = GetGetter<T>(col);
                 var cur = default(T);
@@ -580,26 +582,23 @@ namespace Microsoft.ML.Runtime.Data
                     };
             }
 
-            public ISchema Schema
-            {
-                get { return _schema; }
-            }
+            public Schema Schema => _schemaImpl.AsSchema;
 
             public bool IsColumnActive(int col)
             {
-                Ch.Check(0 <= col && col < _schema.ColumnCount);
+                Ch.Check(0 <= col && col < _schemaImpl.ColumnCount);
                 return _active[col];
             }
 
             public ValueGetter<TValue> GetGetter<TValue>(int col)
             {
-                Ch.CheckParam(0 <= col && col < _schema.ColumnCount, nameof(col));
+                Ch.CheckParam(0 <= col && col < _schemaImpl.ColumnCount, nameof(col));
 
-                if (!_schema.IsPivot(col))
+                if (!_schemaImpl.IsPivot(col))
                     return Input.GetGetter<TValue>(col);
 
                 if (_cachedGetters[col] == null)
-                    _cachedGetters[col] = MakeGetter<TValue>(col, _schema.GetPivotColumnInfoByCol(col).ItemType);
+                    _cachedGetters[col] = MakeGetter<TValue>(col, _schemaImpl.GetPivotColumnInfoByCol(col).ItemType);
 
                 var result = _cachedGetters[col] as ValueGetter<TValue>;
                 Ch.Check(result != null, "Unexpected getter type requested");
@@ -615,7 +614,7 @@ namespace Microsoft.ML.Runtime.Data
                 // cachedIndex == row.Count || _pivotColPosition <= row.Indices[cachedIndex].
                 int cachedIndex = 0;
                 VBuffer<T> row = default(VBuffer<T>);
-                T naValue = Conversions.Instance.GetNAOrDefault<T>(itemType);
+                T naValue = Runtime.Data.Conversion.Conversions.Instance.GetNAOrDefault<T>(itemType);
                 return
                     (ref T value) =>
                     {
@@ -632,18 +631,20 @@ namespace Microsoft.ML.Runtime.Data
                             cachedIndex = 0;
                         }
 
+                        var rowValues = row.GetValues();
                         if (_pivotColPosition >= row.Length)
                             value = naValue;
                         else if (row.IsDense)
-                            value = row.Values[_pivotColPosition];
+                            value = rowValues[_pivotColPosition];
                         else
                         {
                             // The row is sparse.
-                            while (cachedIndex < row.Count && _pivotColPosition > row.Indices[cachedIndex])
+                            var rowIndices = row.GetIndices();
+                            while (cachedIndex < rowIndices.Length && _pivotColPosition > rowIndices[cachedIndex])
                                 cachedIndex++;
 
-                            if (cachedIndex < row.Count && _pivotColPosition == row.Indices[cachedIndex])
-                                value = row.Values[cachedIndex];
+                            if (cachedIndex < rowIndices.Length && _pivotColPosition == rowIndices[cachedIndex])
+                                value = rowValues[cachedIndex];
                             else
                                 value = default(T);
                         }

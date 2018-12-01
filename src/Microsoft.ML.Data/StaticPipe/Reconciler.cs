@@ -2,11 +2,11 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using System;
-using System.Collections.Generic;
 using Microsoft.ML.Core.Data;
 using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.Data;
+using Microsoft.ML.Transforms;
+using System;
+using System.Collections.Generic;
 
 namespace Microsoft.ML.StaticPipe.Runtime
 {
@@ -46,7 +46,7 @@ namespace Microsoft.ML.StaticPipe.Runtime
 
     /// <summary>
     /// Reconciler for column groups intended to resolve to an <see cref="IEstimator{TTransformer}"/>. This type of
-    /// reconciler will work with <see cref="Estimator{TTupleInShape, TTupleOutShape, TTransformer}.Append{TTupleNewOutShape}(Func{TTupleOutShape, TTupleNewOutShape})"/>
+    /// reconciler will work with <see cref="Estimator{TInShape, TOutShape, TTransformer}.Append{TNewOutShape}(Func{TOutShape, TNewOutShape})"/>
     /// or other methods that involve the creation of estimator chains.
     /// </summary>
     public abstract class EstimatorReconciler : Reconciler
@@ -64,7 +64,7 @@ namespace Microsoft.ML.StaticPipe.Runtime
         /// subset of estimator transforms do not allow this: they produce columns whose names are unconfigurable. For
         /// these, there is this collection which provides the names used by the analysis tool. If the estimator under
         /// construction must use one of the names here, then they are responsible for "saving" the column they will
-        /// overwrite using applications of the <see cref="CopyColumnsEstimator"/>. Note that if the estimator under
+        /// overwrite using applications of the <see cref="ColumnCopyingEstimator"/>. Note that if the estimator under
         /// construction has complete control over what columns it produces, there is no need for it to pay this argument
         /// any attention.</param>
         /// <returns>Returns an estimator.</returns>

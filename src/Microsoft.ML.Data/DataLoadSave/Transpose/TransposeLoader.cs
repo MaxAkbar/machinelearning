@@ -9,6 +9,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
@@ -257,7 +258,7 @@ namespace Microsoft.ML.Runtime.Data.IO
             /// <summary>
             /// This is the entry corresponding to the transposed columns. There will be one of
             /// these per column, though some entries will not actually have a corresponding
-            /// dataview (e.g., they will have an offset of 0) if the column was not one selected
+            /// dataview (for example, they will have an offset of 0) if the column was not one selected
             /// for slot-wise transposition.
             /// </summary>
             public sealed class TransposedSubIdv : SubIdvEntry
@@ -364,7 +365,7 @@ namespace Microsoft.ML.Runtime.Data.IO
         // inspect the schema. We also want to ensure that the useful property that
         // a cursor and view's schemas are the same, is preserved, which allows us
         // to use the cursors from the schema view if convenient to do so.
-        public ISchema Schema { get { return _schemaEntry.GetView().Schema; } }
+        public Schema Schema { get { return _schemaEntry.GetView().Schema; } }
 
         public ITransposeSchema TransposeSchema { get { return _schema; } }
 
@@ -535,7 +536,7 @@ namespace Microsoft.ML.Runtime.Data.IO
         /// Save a zero-row dataview that will be used to infer schema information, used in the case
         /// where the tranpsose loader is instantiated with no input streams.
         /// </summary>
-        private static void SaveSchema(IHostEnvironment env, ModelSaveContext ctx, ISchema schema)
+        private static void SaveSchema(IHostEnvironment env, ModelSaveContext ctx, Schema schema)
         {
             Contracts.AssertValue(env);
 
@@ -662,12 +663,12 @@ namespace Microsoft.ML.Runtime.Data.IO
             }
         }
 
-        public long? GetRowCount(bool lazy = true)
+        public long? GetRowCount()
         {
             return _header.RowCount;
         }
 
-        public IRowCursor GetRowCursor(Func<int, bool> predicate, IRandom rand = null)
+        public IRowCursor GetRowCursor(Func<int, bool> predicate, Random rand = null)
         {
             _host.CheckValue(predicate, nameof(predicate));
             _host.CheckValueOrNull(rand);
@@ -676,7 +677,7 @@ namespace Microsoft.ML.Runtime.Data.IO
             return new Cursor(this, predicate);
         }
 
-        public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> predicate, int n, IRandom rand = null)
+        public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> predicate, int n, Random rand = null)
         {
             _host.CheckValue(predicate, nameof(predicate));
             if (HasRowData)
@@ -785,7 +786,7 @@ namespace Microsoft.ML.Runtime.Data.IO
             private readonly Delegate[] _getters;
             private bool _disposed;
 
-            public ISchema Schema { get { return _parent.Schema; } }
+            public Schema Schema => _parent.Schema;
 
             public override long Batch { get { return 0; } }
 

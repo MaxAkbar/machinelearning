@@ -2,9 +2,8 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Float = System.Single;
-
 using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
@@ -14,6 +13,7 @@ using Microsoft.ML.Runtime.Internal.Internallearn;
 using Microsoft.ML.Runtime.Learners;
 using Microsoft.ML.Runtime.Numeric;
 using Microsoft.ML.Runtime.Training;
+using Microsoft.ML.Trainers.Online;
 using System;
 
 [assembly: LoadableClass(AveragedPerceptronTrainer.Summary, typeof(AveragedPerceptronTrainer), typeof(AveragedPerceptronTrainer.Arguments),
@@ -23,7 +23,7 @@ using System;
 
 [assembly: LoadableClass(typeof(void), typeof(AveragedPerceptronTrainer), null, typeof(SignatureEntryPointModule), "AP")]
 
-namespace Microsoft.ML.Runtime.Learners
+namespace Microsoft.ML.Trainers.Online
 {
     // This is an averaged perceptron classifier.
     // Configurable subcomponents:
@@ -40,7 +40,7 @@ namespace Microsoft.ML.Runtime.Learners
 
         private readonly Arguments _args;
 
-        public class Arguments : AveragedLinearArguments
+        public sealed class Arguments : AveragedLinearArguments
         {
             [Argument(ArgumentType.Multiple, HelpText = "Loss Function", ShortName = "loss", SortOrder = 50)]
             public ISupportClassificationLossFactory LossFunction = new HingeLoss.Arguments();
@@ -50,31 +50,112 @@ namespace Microsoft.ML.Runtime.Learners
 
             [Argument(ArgumentType.AtMostOnce, HelpText = "The maximum number of examples to use when training the calibrator", Visibility = ArgumentAttribute.VisibilityType.EntryPointsOnly)]
             public int MaxCalibrationExamples = 1000000;
+
+            internal override IComponentFactory<IScalarOutputLoss> LossFunctionFactory => LossFunction;
         }
 
-        public AveragedPerceptronTrainer(IHostEnvironment env, Arguments args)
+        private sealed class TrainState : AveragedTrainStateBase
+        {
+            public TrainState(IChannel ch, int numFeatures, LinearPredictor predictor, AveragedPerceptronTrainer parent)
+                : base(ch, numFeatures, predictor, parent)
+            {
+            }
+
+            public override LinearBinaryPredictor CreatePredictor()
+            {
+                Contracts.Assert(WeightsScale == 1);
+
+                VBuffer<float> weights = default;
+                float bias;
+
+                if (!Averaged)
+                {
+                    Weights.CopyTo(ref weights);
+                    bias = Bias;
+                }
+                else
+                {
+                    TotalWeights.CopyTo(ref weights);
+                    VectorUtils.ScaleBy(ref weights, 1 / (float)NumWeightUpdates);
+                    bias = TotalBias / (float)NumWeightUpdates;
+                }
+
+                return new LinearBinaryPredictor(ParentHost, in weights, bias);
+            }
+        }
+
+        internal AveragedPerceptronTrainer(IHostEnvironment env, Arguments args)
             : base(args, env, UserNameValue, TrainerUtils.MakeBoolScalarLabel(args.LabelColumn))
         {
             _args = args;
             LossFunction = _args.LossFunction.CreateComponent(env);
+        }
 
-            _outputColumns = new[]
+        /// <summary>
+        /// Trains a linear binary classifier using the averaged perceptron.
+        /// <a href='https://en.wikipedia.org/wiki/Perceptron'>Wikipedia entry for Perceptron</a>
+        /// </summary>
+        /// <param name="env">The local instance of the <see cref="IHostEnvironment"/></param>
+        /// <param name="lossFunction">The classification loss function. </param>
+        /// <param name="labelColumn">The name of the label column. </param>
+        /// <param name="featureColumn">The name of the feature column.</param>
+        /// <param name="weights">The optional name of the weights column.</param>
+        /// <param name="learningRate">The learning rate. </param>
+        /// <param name="decreaseLearningRate">Wheather to decrease learning rate as iterations progress.</param>
+        /// <param name="l2RegularizerWeight">L2 Regularization Weight.</param>
+        /// <param name="numIterations">The number of training iteraitons.</param>
+        /// <param name="advancedSettings">A delegate to supply more advanced arguments to the algorithm.</param>
+        public AveragedPerceptronTrainer(IHostEnvironment env,
+            string labelColumn = DefaultColumnNames.Label,
+            string featureColumn = DefaultColumnNames.Features,
+            string weights = null,
+            IClassificationLoss lossFunction = null,
+            float learningRate = Arguments.AveragedDefaultArgs.LearningRate,
+            bool decreaseLearningRate = Arguments.AveragedDefaultArgs.DecreaseLearningRate,
+            float l2RegularizerWeight = Arguments.AveragedDefaultArgs.L2RegularizerWeight,
+            int numIterations = Arguments.AveragedDefaultArgs.NumIterations,
+            Action<Arguments> advancedSettings = null)
+            : this(env, InvokeAdvanced(advancedSettings, new Arguments
             {
-                new SchemaShape.Column(DefaultColumnNames.Score, SchemaShape.Column.VectorKind.Scalar, NumberType.R4, false, new SchemaShape(MetadataUtils.GetTrainerOutputMetadata())),
-                new SchemaShape.Column(DefaultColumnNames.Probability, SchemaShape.Column.VectorKind.Scalar, NumberType.R4, false, new SchemaShape(MetadataUtils.GetTrainerOutputMetadata(true))),
-                new SchemaShape.Column(DefaultColumnNames.PredictedLabel, SchemaShape.Column.VectorKind.Scalar, BoolType.Instance, false, new SchemaShape(MetadataUtils.GetTrainerOutputMetadata()))
-            };
+                LabelColumn = labelColumn,
+                FeatureColumn = featureColumn,
+                InitialWeights = weights,
+                LearningRate = learningRate,
+                DecreaseLearningRate = decreaseLearningRate,
+                L2RegularizerWeight = l2RegularizerWeight,
+                NumIterations = numIterations,
+                LossFunction = new TrivialFactory(lossFunction ?? new HingeLoss())
+            }))
+        {
+        }
+
+        private sealed class TrivialFactory : ISupportClassificationLossFactory
+        {
+            private IClassificationLoss _loss;
+
+            public TrivialFactory(IClassificationLoss loss)
+            {
+                _loss = loss;
+            }
+
+            IClassificationLoss IComponentFactory<IClassificationLoss>.CreateComponent(IHostEnvironment env) => _loss;
         }
 
         public override PredictionKind PredictionKind => PredictionKind.BinaryClassification;
 
         protected override bool NeedCalibration => true;
 
-        private readonly SchemaShape.Column[] _outputColumns;
+        protected override SchemaShape.Column[] GetOutputColumnsCore(SchemaShape inputSchema)
+        {
+            return new[]
+            {
+                // REVIEW AP is currently not calibrating. Add the probability column after fixing the behavior.
+                new SchemaShape.Column(DefaultColumnNames.Score, SchemaShape.Column.VectorKind.Scalar, NumberType.R4, false, new SchemaShape(MetadataUtils.GetTrainerOutputMetadata())),
+                new SchemaShape.Column(DefaultColumnNames.PredictedLabel, SchemaShape.Column.VectorKind.Scalar, BoolType.Instance, false, new SchemaShape(MetadataUtils.GetTrainerOutputMetadata()))
+            };
+        }
 
-        protected override SchemaShape.Column[] GetOutputColumnsCore(SchemaShape inputSchema) => _outputColumns;
-
-        protected override void CheckLabel(RoleMappedData data)
+        protected override void CheckLabels(RoleMappedData data)
         {
             Contracts.AssertValue(data);
             data.CheckBinaryLabel();
@@ -94,36 +175,22 @@ namespace Microsoft.ML.Runtime.Learners
                 error();
         }
 
-        protected override LinearBinaryPredictor CreatePredictor()
+        private protected override TrainStateBase MakeState(IChannel ch, int numFeatures, LinearPredictor predictor)
         {
-            Contracts.Assert(WeightsScale == 1);
-
-            VBuffer<Float> weights = default(VBuffer<Float>);
-            Float bias;
-
-            if (!_args.Averaged)
-            {
-                Weights.CopyTo(ref weights);
-                bias = Bias;
-            }
-            else
-            {
-                TotalWeights.CopyTo(ref weights);
-                VectorUtils.ScaleBy(ref weights, 1 / (Float)NumWeightUpdates);
-                bias = TotalBias / (Float)NumWeightUpdates;
-            }
-
-            return new LinearBinaryPredictor(Host, ref weights, bias);
+            return new TrainState(ch, numFeatures, predictor, this);
         }
 
-        protected override BinaryPredictionTransformer<LinearBinaryPredictor> MakeTransformer(LinearBinaryPredictor model, ISchema trainSchema)
+        protected override BinaryPredictionTransformer<LinearBinaryPredictor> MakeTransformer(LinearBinaryPredictor model, Schema trainSchema)
         => new BinaryPredictionTransformer<LinearBinaryPredictor>(Host, model, trainSchema, FeatureColumn.Name);
 
+        public BinaryPredictionTransformer<LinearBinaryPredictor> Train(IDataView trainData, IPredictor initialPredictor = null)
+            => TrainTransformer(trainData, initPredictor: initialPredictor);
+
         [TlcModule.EntryPoint(Name = "Trainers.AveragedPerceptronBinaryClassifier",
-            Desc = Summary,
-            UserName = UserNameValue,
-            ShortName = ShortName,
-            XmlInclude = new[] { @"<include file='../Microsoft.ML.StandardLearners/Standard/Online/doc.xml' path='doc/members/member[@name=""AP""]/*' />",
+             Desc = Summary,
+             UserName = UserNameValue,
+             ShortName = ShortName,
+             XmlInclude = new[] { @"<include file='../Microsoft.ML.StandardLearners/Standard/Online/doc.xml' path='doc/members/member[@name=""AP""]/*' />",
                                  @"<include file='../Microsoft.ML.StandardLearners/Standard/Online/doc.xml' path='doc/members/example[@name=""AP""]/*' />"})]
         public static CommonOutputs.BinaryClassificationOutput TrainBinary(IHostEnvironment env, Arguments input)
         {

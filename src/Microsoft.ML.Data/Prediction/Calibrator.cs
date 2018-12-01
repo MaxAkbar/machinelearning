@@ -2,24 +2,24 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Float = System.Single;
-
+using Microsoft.ML.Data;
+using Microsoft.ML.Runtime;
+using Microsoft.ML.Runtime.CommandLine;
+using Microsoft.ML.Runtime.Data;
+using Microsoft.ML.Runtime.EntryPoints;
+using Microsoft.ML.Runtime.Internal.Calibration;
+using Microsoft.ML.Runtime.Internal.Internallearn;
+using Microsoft.ML.Runtime.Internal.Utilities;
+using Microsoft.ML.Runtime.Model;
+using Microsoft.ML.Runtime.Model.Onnx;
+using Microsoft.ML.Runtime.Model.Pfa;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Internal.Calibration;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
-using Microsoft.ML.Runtime.Model.Onnx;
-using Microsoft.ML.Runtime.Model.Pfa;
-using Microsoft.ML.Runtime.Internal.Internallearn;
-using Newtonsoft.Json.Linq;
-using Microsoft.ML.Runtime.EntryPoints;
+using Float = System.Single;
 
 [assembly: LoadableClass(PlattCalibratorTrainer.Summary, typeof(PlattCalibratorTrainer), null, typeof(SignatureCalibrator),
     PlattCalibratorTrainer.UserName,
@@ -215,17 +215,17 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
         }
     }
 
-    public abstract class ValueMapperCalibratedPredictorBase : CalibratedPredictorBase, IValueMapperDist, IWhatTheFeatureValueMapper,
+    public abstract class ValueMapperCalibratedPredictorBase : CalibratedPredictorBase, IValueMapperDist, IFeatureContributionMapper,
         IDistCanSavePfa, IDistCanSaveOnnx
     {
         private readonly IValueMapper _mapper;
-        private readonly IWhatTheFeatureValueMapper _whatTheFeature;
+        private readonly IFeatureContributionMapper _featureContribution;
 
         public ColumnType InputType => _mapper.InputType;
         public ColumnType OutputType => _mapper.OutputType;
         public ColumnType DistType => NumberType.Float;
-        public bool CanSavePfa => (_mapper as ICanSavePfa)?.CanSavePfa == true;
-        public bool CanSaveOnnx => (_mapper as ICanSaveOnnx)?.CanSaveOnnx == true;
+        bool ICanSavePfa.CanSavePfa => (_mapper as ICanSavePfa)?.CanSavePfa == true;
+        bool ICanSaveOnnx.CanSaveOnnx(OnnxContext ctx) => (_mapper as ICanSaveOnnx)?.CanSaveOnnx(ctx) == true;
 
         protected ValueMapperCalibratedPredictorBase(IHostEnvironment env, string name, IPredictorProducing<Float> predictor, ICalibrator calibrator)
             : base(env, name, predictor, calibrator)
@@ -236,7 +236,7 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
             Host.Check(_mapper != null, "The predictor does not implement IValueMapper");
             Host.Check(_mapper.OutputType == NumberType.Float, "The output type of the predictor is expected to be Float");
 
-            _whatTheFeature = predictor as IWhatTheFeatureValueMapper;
+            _featureContribution = predictor as IFeatureContributionMapper;
         }
 
         public ValueMapper<TIn, TOut> GetMapper<TIn, TOut>()
@@ -250,22 +250,22 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
             Host.Check(typeof(TDist) == typeof(Float));
             var map = GetMapper<TIn, Float>();
             ValueMapper<TIn, Float, Float> del =
-                (ref TIn src, ref Float score, ref Float prob) =>
+                (in TIn src, ref Float score, ref Float prob) =>
                 {
-                    map(ref src, ref score);
+                    map(in src, ref score);
                     prob = Calibrator.PredictProbability(score);
                 };
             return (ValueMapper<TIn, TOut, TDist>)(Delegate)del;
         }
 
-        public ValueMapper<TSrc, VBuffer<Float>> GetWhatTheFeatureMapper<TSrc, TDst>(int top, int bottom, bool normalize)
+        public ValueMapper<TSrc, VBuffer<Float>> GetFeatureContributionMapper<TSrc, TDst>(int top, int bottom, bool normalize)
         {
             // REVIEW: checking this a bit too late.
-            Host.Check(_whatTheFeature != null, "Predictor does not implement IWhatTheFeatureValueMapper");
-            return _whatTheFeature.GetWhatTheFeatureMapper<TSrc, TDst>(top, bottom, normalize);
+            Host.Check(_featureContribution != null, "Predictor does not implement IFeatureContributionMapper");
+            return _featureContribution.GetFeatureContributionMapper<TSrc, TDst>(top, bottom, normalize);
         }
 
-        public JToken SaveAsPfa(BoundPfaContext ctx, JToken input)
+        JToken ISingleCanSavePfa.SaveAsPfa(BoundPfaContext ctx, JToken input)
         {
             Host.CheckValue(ctx, nameof(ctx));
             Host.CheckValue(input, nameof(input));
@@ -275,7 +275,7 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
             return mapper.SaveAsPfa(ctx, input);
         }
 
-        public void SaveAsPfa(BoundPfaContext ctx, JToken input,
+        void IDistCanSavePfa.SaveAsPfa(BoundPfaContext ctx, JToken input,
             string score, out JToken scoreToken, string prob, out JToken probToken)
         {
             Host.CheckValue(ctx, nameof(ctx));
@@ -283,7 +283,7 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
             Host.CheckValueOrNull(score);
             Host.CheckValueOrNull(prob);
 
-            JToken scoreExpression = SaveAsPfa(ctx, input);
+            JToken scoreExpression = ((ISingleCanSavePfa)this).SaveAsPfa(ctx, input);
             scoreToken = ctx.DeclareVar(score, scoreExpression);
             var calibrator = Calibrator as ISingleCanSavePfa;
             if (calibrator?.CanSavePfa != true)
@@ -296,7 +296,10 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
             probToken = ctx.DeclareVar(prob, probExpression);
         }
 
-        public bool SaveAsOnnx(OnnxContext ctx, string[] outputNames, string featureColumnName)
+        bool IDistCanSaveOnnx.SaveAsOnnx(OnnxContext ctx, string[] outputNames, string featureColumnName)
+            => ((ISingleCanSaveOnnx)this).SaveAsOnnx(ctx, outputNames, featureColumnName);
+
+        bool ISingleCanSaveOnnx.SaveAsOnnx(OnnxContext ctx, string[] outputNames, string featureColumnName)
         {
             Host.CheckValue(ctx, nameof(ctx));
             Host.CheckValue(outputNames, nameof(outputNames));
@@ -308,7 +311,7 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
                 return false;
 
             var calibrator = Calibrator as ISingleCanSaveOnnx;
-            if (!(calibrator?.CanSaveOnnx == true && calibrator.SaveAsOnnx(ctx, new[] { outputNames[1], outputNames[2] }, featureColumnName)))
+            if (!(calibrator?.CanSaveOnnx(ctx) == true && calibrator.SaveAsOnnx(ctx, new[] { outputNames[1], outputNames[2] }, featureColumnName)))
                 ctx.RemoveVariable(outputNames[1], true);
 
             return true;
@@ -514,7 +517,7 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
     }
 
     public sealed class SchemaBindableCalibratedPredictor : CalibratedPredictorBase, ISchemaBindableMapper, ICanSaveModel,
-        IBindableCanSavePfa, IBindableCanSaveOnnx, IWhatTheFeatureValueMapper
+        IBindableCanSavePfa, IBindableCanSaveOnnx, IFeatureContributionMapper
     {
         private sealed class Bound : ISchemaBoundRowMapper
         {
@@ -524,8 +527,8 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
 
             public ISchemaBindableMapper Bindable => _parent;
             public RoleMappedSchema InputRoleMappedSchema => _predictor.InputRoleMappedSchema;
-            public ISchema InputSchema => _predictor.InputSchema;
-            public ISchema Schema { get; }
+            public Schema InputSchema => _predictor.InputSchema;
+            public Schema OutputSchema { get; }
 
             public Bound(IHostEnvironment env, SchemaBindableCalibratedPredictor parent, RoleMappedSchema schema)
             {
@@ -534,16 +537,16 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
                 _parent = parent;
                 _predictor = _parent._bindable.Bind(env, schema) as ISchemaBoundRowMapper;
                 env.Check(_predictor != null, "Predictor is not a row-to-row mapper");
-                if (!_predictor.Schema.TryGetColumnIndex(MetadataUtils.Const.ScoreValueKind.Score, out _scoreCol))
+                if (!_predictor.OutputSchema.TryGetColumnIndex(MetadataUtils.Const.ScoreValueKind.Score, out _scoreCol))
                     throw env.Except("Predictor does not output a score");
-                var scoreType = _predictor.Schema.GetColumnType(_scoreCol);
+                var scoreType = _predictor.OutputSchema.GetColumnType(_scoreCol);
                 env.Check(!scoreType.IsVector && scoreType.IsNumber);
-                Schema = new BinaryClassifierSchema();
+                OutputSchema = Schema.Create(new BinaryClassifierSchema());
             }
 
             public Func<int, bool> GetDependencies(Func<int, bool> predicate)
             {
-                for (int i = 0; i < Schema.ColumnCount; i++)
+                for (int i = 0; i < OutputSchema.ColumnCount; i++)
                 {
                     if (predicate(i))
                         return _predictor.GetDependencies(col => true);
@@ -559,7 +562,7 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
             public IRow GetRow(IRow input, Func<int, bool> predicate, out Action disposer)
             {
                 Func<int, bool> predictorPredicate = col => false;
-                for (int i = 0; i < Schema.ColumnCount; i++)
+                for (int i = 0; i < OutputSchema.ColumnCount; i++)
                 {
                     if (predicate(i))
                     {
@@ -568,17 +571,17 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
                     }
                 }
                 var predictorRow = _predictor.GetRow(input, predictorPredicate, out disposer);
-                var getters = new Delegate[Schema.ColumnCount];
-                for (int i = 0; i < Schema.ColumnCount - 1; i++)
+                var getters = new Delegate[OutputSchema.ColumnCount];
+                for (int i = 0; i < OutputSchema.ColumnCount - 1; i++)
                 {
                     var type = predictorRow.Schema.GetColumnType(i);
                     if (!predicate(i))
                         continue;
                     getters[i] = Utils.MarshalInvoke(GetPredictorGetter<int>, type.RawType, predictorRow, i);
                 }
-                if (predicate(Schema.ColumnCount - 1))
-                    getters[Schema.ColumnCount - 1] = GetProbGetter(predictorRow);
-                return new SimpleRow(Schema, predictorRow, getters);
+                if (predicate(OutputSchema.ColumnCount - 1))
+                    getters[OutputSchema.ColumnCount - 1] = GetProbGetter(predictorRow);
+                return new SimpleRow(OutputSchema, predictorRow, getters);
             }
 
             private Delegate GetPredictorGetter<T>(IRow input, int col)
@@ -601,7 +604,7 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
         }
 
         private readonly ISchemaBindableMapper _bindable;
-        private readonly IWhatTheFeatureValueMapper _whatTheFeature;
+        private readonly IFeatureContributionMapper _featureContribution;
 
         public const string LoaderSignature = "SchemaBindableCalibrated";
 
@@ -620,22 +623,22 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
         /// Whether we can save as PFA. Note that this depends on whether the underlying predictor
         /// can save as PFA, since in the event that this in particular does not get saved,
         /// </summary>
-        public bool CanSavePfa => (_bindable as ICanSavePfa)?.CanSavePfa == true;
+        bool ICanSavePfa.CanSavePfa => (_bindable as ICanSavePfa)?.CanSavePfa == true;
 
-        public bool CanSaveOnnx => (_bindable as ICanSaveOnnx)?.CanSaveOnnx == true;
+        bool ICanSaveOnnx.CanSaveOnnx(OnnxContext ctx) => (_bindable as ICanSaveOnnx)?.CanSaveOnnx(ctx) == true;
 
         public SchemaBindableCalibratedPredictor(IHostEnvironment env, IPredictorProducing<Single> predictor, ICalibrator calibrator)
             : base(env, LoaderSignature, predictor, calibrator)
         {
             _bindable = ScoreUtils.GetSchemaBindableMapper(Host, SubPredictor);
-            _whatTheFeature = SubPredictor as IWhatTheFeatureValueMapper;
+            _featureContribution = SubPredictor as IFeatureContributionMapper;
         }
 
         private SchemaBindableCalibratedPredictor(IHostEnvironment env, ModelLoadContext ctx)
             : base(env, LoaderSignature, GetPredictor(env, ctx), GetCalibrator(env, ctx))
         {
             _bindable = ScoreUtils.GetSchemaBindableMapper(Host, SubPredictor);
-            _whatTheFeature = SubPredictor as IWhatTheFeatureValueMapper;
+            _featureContribution = SubPredictor as IFeatureContributionMapper;
         }
 
         public static SchemaBindableCalibratedPredictor Create(IHostEnvironment env, ModelLoadContext ctx)
@@ -653,22 +656,22 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
             SaveCore(ctx);
         }
 
-        public void SaveAsPfa(BoundPfaContext ctx, RoleMappedSchema schema, string[] outputs)
+        void IBindableCanSavePfa.SaveAsPfa(BoundPfaContext ctx, RoleMappedSchema schema, string[] outputs)
         {
             Host.CheckValue(ctx, nameof(ctx));
             Host.CheckValue(schema, nameof(schema));
             Host.CheckParam(Utils.Size(outputs) == 2, nameof(outputs), "Expected this to have two outputs");
-            Host.Check(CanSavePfa, "Called despite not being savable");
+            Host.Check(((ICanSavePfa)this).CanSavePfa, "Called despite not being savable");
 
             ctx.Hide(outputs);
         }
 
-        public bool SaveAsOnnx(OnnxContext ctx, RoleMappedSchema schema, string[] outputs)
+        bool IBindableCanSaveOnnx.SaveAsOnnx(OnnxContext ctx, RoleMappedSchema schema, string[] outputs)
         {
             Host.CheckValue(ctx, nameof(ctx));
             Host.CheckParam(Utils.Size(outputs) == 2, nameof(outputs), "Expected this to have two outputs");
             Host.CheckValue(schema, nameof(schema));
-            Host.Check(CanSaveOnnx, "Called despite not being savable");
+            Host.Check(((ICanSaveOnnx)this).CanSaveOnnx(ctx), "Called despite not being savable");
             return false;
         }
 
@@ -679,15 +682,16 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
             return new Bound(Host, this, schema);
         }
 
-        public ValueMapper<TSrc, VBuffer<float>> GetWhatTheFeatureMapper<TSrc, TDst>(int top, int bottom, bool normalize)
+        public ValueMapper<TSrc, VBuffer<float>> GetFeatureContributionMapper<TSrc, TDst>(int top, int bottom, bool normalize)
         {
             // REVIEW: checking this a bit too late.
-            Host.Check(_whatTheFeature != null, "Predictor does not implement IWhatTheFeatureValueMapper");
-            return _whatTheFeature.GetWhatTheFeatureMapper<TSrc, TDst>(top, bottom, normalize);
+            Host.Check(_featureContribution != null, "Predictor does not implement " + nameof(IFeatureContributionMapper));
+            return _featureContribution.GetFeatureContributionMapper<TSrc, TDst>(top, bottom, normalize);
         }
     }
 
-    public static class CalibratorUtils
+    [BestFriend]
+    internal static class CalibratorUtils
     {
         private static bool NeedCalibration(IHostEnvironment env, IChannel ch, ICalibratorTrainer calibrator,
             ITrainer trainer, IPredictor predictor, RoleMappedSchema schema)
@@ -724,7 +728,7 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
 
             var bindable = ScoreUtils.GetSchemaBindableMapper(env, predictor);
             var bound = bindable.Bind(env, schema);
-            var outputSchema = bound.Schema;
+            var outputSchema = bound.OutputSchema;
             int scoreCol;
             if (!outputSchema.TryGetColumnIndex(MetadataUtils.Const.ScoreValueKind.Score, out scoreCol))
             {
@@ -1045,7 +1049,7 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
             ctx.Writer.Write(sizeof(Float));
             ctx.Writer.Write(_binSize);
             ctx.Writer.Write(_min);
-            ctx.Writer.WriteFloatArray(_binProbs);
+            ctx.Writer.WriteSingleArray(_binProbs);
         }
 
         /// <summary>
@@ -1348,8 +1352,8 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
 
         public Double ParamA { get; }
         public Double ParamB { get; }
-        public bool CanSavePfa => true;
-        public bool CanSaveOnnx => true;
+        bool ICanSavePfa.CanSavePfa => true;
+        bool ICanSaveOnnx.CanSaveOnnx(OnnxContext ctx) => true;
 
         public PlattCalibrator(IHostEnvironment env, Double paramA, Double paramB)
         {
@@ -1426,7 +1430,7 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
             return (Float)(1 / (1 + Math.Exp(a * output + b)));
         }
 
-        public JToken SaveAsPfa(BoundPfaContext ctx, JToken input)
+        JToken ISingleCanSavePfa.SaveAsPfa(BoundPfaContext ctx, JToken input)
         {
             _host.CheckValue(ctx, nameof(ctx));
             _host.CheckValue(input, nameof(input));
@@ -1435,7 +1439,7 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
                 PfaUtils.Call("+", -ParamB, PfaUtils.Call("*", -ParamA, input)));
         }
 
-        public bool SaveAsOnnx(OnnxContext ctx, string[] scoreProbablityColumnNames, string featureColumnName)
+        bool ISingleCanSaveOnnx.SaveAsOnnx(OnnxContext ctx, string[] scoreProbablityColumnNames, string featureColumnName)
         {
             _host.CheckValue(ctx, nameof(ctx));
             _host.CheckValue(scoreProbablityColumnNames, nameof(scoreProbablityColumnNames));
@@ -1489,7 +1493,7 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
     public class PavCalibratorTrainer : CalibratorTrainerBase
     {
         // a piece of the piecwise function
-        private struct Piece
+        private readonly struct Piece
         {
             public readonly Float MinX; // end of interval.
             public readonly Float MaxX; // beginning of interval.
@@ -1743,7 +1747,7 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
 
     public sealed class CalibrationDataStore : IEnumerable<CalibrationDataStore.DataItem>
     {
-        public struct DataItem
+        public readonly struct DataItem
         {
             // The actual binary label of this example.
             public readonly bool Target;
@@ -1929,8 +1933,6 @@ namespace Microsoft.ML.Runtime.Internal.Calibration
                     calibratedPredictor =
                         CalibratorUtils.TrainCalibrator(host, ch, calibratorTrainer, input.MaxRows, predictor, data);
                 }
-                ch.Done();
-
                 return new TOut() { PredictorModel = new PredictorModel(host, data, input.Data, calibratedPredictor) };
             }
         }

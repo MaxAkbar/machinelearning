@@ -3,10 +3,12 @@
 // See the LICENSE file in the project root for more information.
 
 using BenchmarkDotNet.Attributes;
-using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Data;
+using Microsoft.ML.Trainers.FastTree;
+using Microsoft.ML.Runtime.LightGBM;
 using Microsoft.ML.Runtime.RunTests;
 using Microsoft.ML.Runtime.Tools;
+using Microsoft.ML.Transforms.Conversions;
 using System.IO;
 
 namespace Microsoft.ML.Benchmarks
@@ -22,12 +24,12 @@ namespace Microsoft.ML.Benchmarks
         {
             _mslrWeb10k_Validate = Path.GetFullPath(TestDatasets.MSLRWeb.validFilename);
             _mslrWeb10k_Train = Path.GetFullPath(TestDatasets.MSLRWeb.trainFilename);
-            
+
             if (!File.Exists(_mslrWeb10k_Validate))
-                throw new FileNotFoundException(string.Format(Helpers.DatasetNotFound, _mslrWeb10k_Validate));
+                throw new FileNotFoundException(string.Format(Errors.DatasetNotFound, _mslrWeb10k_Validate));
 
             if (!File.Exists(_mslrWeb10k_Train))
-                throw new FileNotFoundException(string.Format(Helpers.DatasetNotFound, _mslrWeb10k_Train));
+                throw new FileNotFoundException(string.Format(Errors.DatasetNotFound, _mslrWeb10k_Train));
         }
 
         [Benchmark]
@@ -40,10 +42,8 @@ namespace Microsoft.ML.Benchmarks
                 " xf=HashTransform{col=GroupId} xf=NAHandleTransform{col=Features}" +
                 " tr=FastTreeRanking{}";
 
-            using (var environment = new ConsoleEnvironment(verbose: false, sensitivity: MessageSensitivity.None, outWriter: EmptyWriter.Instance))
-            {
-                Maml.MainCore(environment, cmd, alwaysPrintStacktrace: false);
-            }
+            var environment = EnvironmentFactory.CreateRankingEnvironment<RankerEvaluator, TextLoader, HashingTransformer, FastTreeRankingTrainer>();
+            Maml.MainCore(environment, cmd, alwaysPrintStacktrace: false);
         }
 
         [Benchmark]
@@ -57,14 +57,11 @@ namespace Microsoft.ML.Benchmarks
                 " xf=NAHandleTransform{col=Features}" +
                 " tr=LightGBMRanking{}";
 
-            using (var environment = new ConsoleEnvironment(verbose: false, sensitivity: MessageSensitivity.None, outWriter: EmptyWriter.Instance))
-            {
-                Maml.MainCore(environment, cmd, alwaysPrintStacktrace: false);
-            }
+            var environment = EnvironmentFactory.CreateRankingEnvironment<RankerEvaluator, TextLoader, HashingTransformer, LightGbmMulticlassTrainer>();
+            Maml.MainCore(environment, cmd, alwaysPrintStacktrace: false);
         }
     }
 
-    [Config(typeof(PredictConfig))]
     public class RankingTest
     {
         private string _mslrWeb10k_Validate;
@@ -80,13 +77,13 @@ namespace Microsoft.ML.Benchmarks
             _mslrWeb10k_Train = Path.GetFullPath(TestDatasets.MSLRWeb.trainFilename);
 
             if (!File.Exists(_mslrWeb10k_Test))
-                throw new FileNotFoundException(string.Format(Helpers.DatasetNotFound, _mslrWeb10k_Test));
+                throw new FileNotFoundException(string.Format(Errors.DatasetNotFound, _mslrWeb10k_Test));
 
             if (!File.Exists(_mslrWeb10k_Validate))
-                throw new FileNotFoundException(string.Format(Helpers.DatasetNotFound, _mslrWeb10k_Validate));
+                throw new FileNotFoundException(string.Format(Errors.DatasetNotFound, _mslrWeb10k_Validate));
 
             if (!File.Exists(_mslrWeb10k_Train))
-                throw new FileNotFoundException(string.Format(Helpers.DatasetNotFound, _mslrWeb10k_Train));
+                throw new FileNotFoundException(string.Format(Errors.DatasetNotFound, _mslrWeb10k_Train));
 
             _modelPath_MSLR = Path.Combine(Directory.GetCurrentDirectory(), @"FastTreeRankingModel.zip");
 
@@ -99,10 +96,8 @@ namespace Microsoft.ML.Benchmarks
                 " tr=FastTreeRanking{}" +
                 " out={" + _modelPath_MSLR + "}";
 
-            using (var environment = new ConsoleEnvironment(verbose: false, sensitivity: MessageSensitivity.None, outWriter: EmptyWriter.Instance))
-            {
-                Maml.MainCore(environment, cmd, alwaysPrintStacktrace: false);
-            }
+            var environment = EnvironmentFactory.CreateRankingEnvironment<RankerEvaluator, TextLoader, HashingTransformer, FastTreeRankingTrainer>();
+            Maml.MainCore(environment, cmd, alwaysPrintStacktrace: false);
         }
 
         [Benchmark]
@@ -110,10 +105,9 @@ namespace Microsoft.ML.Benchmarks
         {
             // This benchmark is profiling bulk scoring speed and not training speed. 
             string cmd = @"Test data=" + _mslrWeb10k_Test + " in=" + _modelPath_MSLR;
-            using (var environment = new ConsoleEnvironment(verbose: false, sensitivity: MessageSensitivity.None, outWriter: EmptyWriter.Instance))
-            {
-                Maml.MainCore(environment, cmd, alwaysPrintStacktrace: false);
-            }
+
+            var environment = EnvironmentFactory.CreateRankingEnvironment<RankerEvaluator, TextLoader, HashingTransformer, FastTreeRankingTrainer>();
+            Maml.MainCore(environment, cmd, alwaysPrintStacktrace: false);
         }
     }
 }

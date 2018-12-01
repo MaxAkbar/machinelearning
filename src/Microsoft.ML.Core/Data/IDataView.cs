@@ -2,23 +2,22 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+using Microsoft.ML.Data;
 using System;
 using System.Collections.Generic;
-using Microsoft.ML.Runtime.Internal.Utilities;
 
 namespace Microsoft.ML.Runtime.Data
 {
     /// <summary>
-    /// Interface for schema information.
+    /// Legacy interface for schema information.
+    /// Please avoid implementing this interface, use <see cref="Schema"/>.
     /// </summary>
     public interface ISchema
     {
         /// <summary>
         /// Number of columns.
         /// </summary>
-        int ColumnCount {
-            get;
-        }
+        int ColumnCount { get; }
 
         /// <summary>
         /// If there is a column with the given name, set col to its index and return true.
@@ -62,21 +61,10 @@ namespace Microsoft.ML.Runtime.Data
     }
 
     /// <summary>
-    /// Base interface for schematized information. IDataView and IRowCursor both derive from this.
-    /// </summary>
-    public interface ISchematized
-    {
-        /// <summary>
-        /// Gets an instance of Schema.
-        /// </summary>
-        ISchema Schema { get; }
-    }
-
-    /// <summary>
     /// The input and output of Query Operators (Transforms). This is the fundamental data pipeline
     /// type, comparable to IEnumerable for LINQ.
     /// </summary>
-    public interface IDataView : ISchematized
+    public interface IDataView
     {
         /// <summary>
         /// Whether this IDataView supports shuffling of rows, to any degree.
@@ -84,17 +72,15 @@ namespace Microsoft.ML.Runtime.Data
         bool CanShuffle { get; }
 
         /// <summary>
-        /// Returns the number of rows if known. Null means unknown. If lazy is true, then
-        /// this is permitted to return null when it might return a non-null value on a subsequent
-        /// call. This indicates, that the transform does not YET know the number of rows, but
-        /// may in the future. If lazy is false, then this is permitted to do some work (no more
-        /// that it would normally do for cursoring) to determine the number of rows.
+        /// Returns the number of rows if known. Returning null means that the row count is unknown but
+        /// it might return a non-null value on a subsequent call. This indicates, that the transform does
+        /// not YET know the number of rows, but may in the future. Its implementation's computation
+        /// complexity should be O(1).
         ///
-        /// Most components will return the same answer whether lazy is true or false. Some, like
-        /// a cache, might return null until the cache is fully populated (when lazy is true). When
-        /// lazy is false, such a cache would block until the cache was populated.
+        /// Most implementation will return the same answer every time. Some, like a cache, might
+        /// return null until the cache is fully populated.
         /// </summary>
-        long? GetRowCount(bool lazy = true);
+        long? GetRowCount();
 
         /// <summary>
         /// Get a row cursor. The active column indices are those for which needCol(col) returns true.
@@ -102,7 +88,7 @@ namespace Microsoft.ML.Runtime.Data
         /// a getter for an inactive columns will throw. The <paramref name="needCol"/> predicate must be
         /// non-null. To activate all columns, pass "col => true".
         /// </summary>
-        IRowCursor GetRowCursor(Func<int, bool> needCol, IRandom rand = null);
+        IRowCursor GetRowCursor(Func<int, bool> needCol, Random rand = null);
 
         /// <summary>
         /// This constructs a set of parallel batch cursors. The value n is a recommended limit
@@ -112,7 +98,7 @@ namespace Microsoft.ML.Runtime.Data
         /// an implementation can return a different number of cursors.
         ///
         /// The cursors should return the same data as returned through
-        /// <see cref="GetRowCursor(Func{int, bool}, IRandom)"/>, except partitioned: no two cursors
+        /// <see cref="GetRowCursor(Func{int, bool}, Random)"/>, except partitioned: no two cursors
         /// should return the "same" row as would have been returned through the regular serial cursor,
         /// but all rows should be returned by exactly one of the cursors returned from this cursor.
         /// The cursors can have their values reconciled downstream through the use of the
@@ -126,7 +112,12 @@ namespace Microsoft.ML.Runtime.Data
         /// <param name="rand">An instance </param>
         /// <returns></returns>
         IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator,
-            Func<int, bool> needCol, int n, IRandom rand = null);
+            Func<int, bool> needCol, int n, Random rand = null);
+
+        /// <summary>
+        /// Gets an instance of Schema.
+        /// </summary>
+        Schema Schema { get; }
     }
 
     /// <summary>
@@ -151,7 +142,7 @@ namespace Microsoft.ML.Runtime.Data
     /// A logical row. May be a row of an IDataView or a stand-alone row. If/when its contents
     /// change, its ICounted.Counter value is incremented.
     /// </summary>
-    public interface IRow : ISchematized, ICounted
+    public interface IRow : ICounted
     {
         /// <summary>
         /// Returns whether the given column is active in this row.
@@ -161,10 +152,16 @@ namespace Microsoft.ML.Runtime.Data
         /// <summary>
         /// Returns a value getter delegate to fetch the given column value from the row.
         /// This throws if the column is not active in this row, or if the type
-        /// <typeparamref name="TValue"/> differs from this row's schema's
-        /// <see cref="ISchema.GetColumnType(int)"/> on <paramref name="col"/>.
+        /// <typeparamref name="TValue"/> differs from this column's type.
         /// </summary>
         ValueGetter<TValue> GetGetter<TValue>(int col);
+
+        /// <summary>
+        /// Gets a <see cref="Schema"/>, which provides name and type information for variables
+        /// (i.e., columns in ML.NET's type system) stored in this row.
+        /// </summary>
+        Schema Schema { get; }
+
     }
 
     /// <summary>

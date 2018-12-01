@@ -3,6 +3,7 @@
 // See the LICENSE file in the project root for more information.
 
 using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
 
 namespace Microsoft.ML.Runtime.Data
 {
@@ -45,7 +46,7 @@ namespace Microsoft.ML.Runtime.Data
         }
 
         /// <summary>
-        /// Append another estimator to the end.
+        /// Create a new reader estimator, by appending another estimator to the end of this reader estimator.
         /// </summary>
         public CompositeReaderEstimator<TSource, TNewTrans> Append<TNewTrans>(IEstimator<TNewTrans> estimator)
             where TNewTrans : class, ITransformer

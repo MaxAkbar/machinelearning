@@ -3,6 +3,7 @@
 // See the LICENSE file in the project root for more information.
 
 using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
@@ -111,7 +112,7 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
 
         // Factory method for SignatureLoadRowMapper.
         private static IRowMapper Create(IHostEnvironment env, ModelLoadContext ctx, ISchema inputSchema)
-            => Create(env, ctx).MakeRowMapper(inputSchema);
+            => Create(env, ctx).MakeRowMapper(Schema.Create(inputSchema));
 
         protected override void CheckInputColumn(ISchema inputSchema, int col, int srcCol)
         {
@@ -146,22 +147,21 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
                 loaderAssemblyName: typeof(ImageLoaderTransform).Assembly.FullName);
         }
 
-        protected override IRowMapper MakeRowMapper(ISchema schema)
-            => new Mapper(this, schema);
+        protected override IRowMapper MakeRowMapper(Schema schema) => new Mapper(this, schema);
 
-        private sealed class Mapper : MapperBase
+        private sealed class Mapper : OneToOneMapperBase
         {
             private readonly ImageLoaderTransform _parent;
             private readonly ImageType _imageType;
 
-            public Mapper(ImageLoaderTransform parent, ISchema inputSchema)
+            public Mapper(ImageLoaderTransform parent, Schema inputSchema)
                 : base(parent.Host.Register(nameof(Mapper)), parent, inputSchema)
             {
                 _imageType = new ImageType();
                 _parent = parent;
             }
 
-            protected override Delegate MakeGetter(IRow input, int iinfo, out Action disposer)
+            protected override Delegate MakeGetter(IRow input, int iinfo, Func<int, bool> activeOutput, out Action disposer)
             {
                 Contracts.AssertValue(input);
                 Contracts.Assert(0 <= iinfo && iinfo < _parent.ColumnPairs.Length);
@@ -196,31 +196,33 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
                                 // appears to be incorrect. When the file isn't found, it throws an ArgumentException,
                                 // while the documentation says FileNotFoundException. Not sure what it will throw
                                 // in other cases, like corrupted file, etc.
-
-                                // REVIEW : Log failures.
-                                dst = null;
+                                throw Host.Except($"Image {src.ToString()} was not found.");
                             }
+
+                            // Check for an incorrect pixel format which indicates the loading failed
+                            if (dst.PixelFormat == System.Drawing.Imaging.PixelFormat.DontCare)
+                                throw Host.Except($"Failed to load image {src.ToString()}.");
                         }
                     };
                 return del;
             }
 
-            public override RowMapperColumnInfo[] GetOutputColumns()
-                => _parent.ColumnPairs.Select(x => new RowMapperColumnInfo(x.output, _imageType, null)).ToArray();
+            protected override Schema.DetachedColumn[] GetOutputColumnsCore()
+                => _parent.ColumnPairs.Select(x => new Schema.DetachedColumn(x.output, _imageType, null)).ToArray();
         }
     }
 
-    public sealed class ImageLoaderEstimator : TrivialEstimator<ImageLoaderTransform>
+    public sealed class ImageLoadingEstimator : TrivialEstimator<ImageLoaderTransform>
     {
         private readonly ImageType _imageType;
 
-        public ImageLoaderEstimator(IHostEnvironment env, string imageFolder, params (string input, string output)[] columns)
+        public ImageLoadingEstimator(IHostEnvironment env, string imageFolder, params (string input, string output)[] columns)
             : this(env, new ImageLoaderTransform(env, imageFolder, columns))
         {
         }
 
-        public ImageLoaderEstimator(IHostEnvironment env, ImageLoaderTransform transformer)
-            : base(Contracts.CheckRef(env, nameof(env)).Register(nameof(ImageLoaderEstimator)), transformer)
+        public ImageLoadingEstimator(IHostEnvironment env, ImageLoaderTransform transformer)
+            : base(Contracts.CheckRef(env, nameof(env)).Register(nameof(ImageLoadingEstimator)), transformer)
         {
             _imageType = new ImageType();
         }
@@ -242,7 +244,7 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
             return new SchemaShape(result.Values);
         }
 
-        internal sealed class OutPipelineColumn : Scalar<UnknownSizeBitmap>
+        internal sealed class OutPipelineColumn : Custom<UnknownSizeBitmap>
         {
             private readonly Scalar<string> _input;
 
@@ -254,7 +256,7 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
             }
 
             /// <summary>
-            /// Reconciler to an <see cref="ImageLoaderEstimator"/> for the <see cref="PipelineColumn"/>.
+            /// Reconciler to an <see cref="ImageLoadingEstimator"/> for the <see cref="PipelineColumn"/>.
             /// </summary>
             /// <remarks>
             /// We must create a new reconciler per call, because the relative path of <see cref="ImageLoaderTransform.Arguments.ImageFolder"/>
@@ -294,7 +296,7 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
                         var outCol = (OutPipelineColumn)toOutput[i];
                         cols[i] = (inputNames[outCol._input], outputNames[outCol]);
                     }
-                    return new ImageLoaderEstimator(env, _relTo, cols);
+                    return new ImageLoadingEstimator(env, _relTo, cols);
                 }
             }
         }

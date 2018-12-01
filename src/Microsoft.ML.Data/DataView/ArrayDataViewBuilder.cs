@@ -2,12 +2,10 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Float = System.Single;
-
-using System;
-using System.Linq;
-using System.Collections.Generic;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime.Internal.Utilities;
+using System;
+using System.Collections.Generic;
 
 namespace Microsoft.ML.Runtime.Data
 {
@@ -190,116 +188,14 @@ namespace Microsoft.ML.Runtime.Data
 
         private sealed class DataView : IDataView
         {
-            private class SchemaImpl : ISchema
-            {
-                private readonly IExceptionContext _ectx;
-                private readonly ColumnType[] _columnTypes;
-                private readonly string[] _names;
-                private readonly Dictionary<string, int> _name2col;
-                private readonly Dictionary<string, ValueGetter<VBuffer<ReadOnlyMemory<char>>>> _getSlotNamesDict;
-                private readonly Dictionary<string, ValueGetter<VBuffer<ReadOnlyMemory<char>>>> _getKeyValuesDict;
-
-                public SchemaImpl(IExceptionContext ectx, ColumnType[] columnTypes, string[] names, ArrayDataViewBuilder builder)
-                {
-                    Contracts.AssertValue(ectx);
-                    _ectx = ectx;
-                    _ectx.AssertValue(columnTypes);
-                    _ectx.AssertValue(names);
-                    _ectx.Assert(columnTypes.Length == names.Length);
-
-                    _columnTypes = columnTypes;
-                    _names = names;
-                    _name2col = new Dictionary<string, int>();
-                    for (int i = 0; i < _names.Length; ++i)
-                        _name2col[_names[i]] = i;
-
-                    _getSlotNamesDict = builder._getSlotNames;
-                    _getKeyValuesDict = builder._getKeyValues;
-                }
-
-                public int ColumnCount { get { return _columnTypes.Length; } }
-
-                public string GetColumnName(int col)
-                {
-                    _ectx.CheckParam(0 <= col & col < ColumnCount, nameof(col));
-                    return _names[col];
-                }
-
-                public ColumnType GetColumnType(int col)
-                {
-                    _ectx.CheckParam(0 <= col & col < ColumnCount, nameof(col));
-                    return _columnTypes[col];
-                }
-
-                public bool TryGetColumnIndex(string name, out int col)
-                {
-                    _ectx.CheckValueOrNull(name);
-                    if (name == null)
-                    {
-                        col = default(int);
-                        return false;
-                    }
-                    return _name2col.TryGetValue(name, out col);
-                }
-
-                public IEnumerable<KeyValuePair<string, ColumnType>> GetMetadataTypes(int col)
-                {
-                    _ectx.CheckParam(0 <= col && col < ColumnCount, nameof(col));
-                    if (_getSlotNamesDict.ContainsKey(_names[col]))
-                        yield return MetadataUtils.GetSlotNamesPair(_columnTypes[col].VectorSize);
-                    if (_getKeyValuesDict.ContainsKey(_names[col]))
-                        yield return MetadataUtils.GetKeyNamesPair(_columnTypes[col].VectorSize);
-                }
-
-                public ColumnType GetMetadataTypeOrNull(string kind, int col)
-                {
-                    _ectx.CheckNonEmpty(kind, nameof(kind));
-                    _ectx.CheckParam(0 <= col && col < ColumnCount, nameof(col));
-                    if (kind == MetadataUtils.Kinds.SlotNames && _getSlotNamesDict.ContainsKey(_names[col]))
-                        return MetadataUtils.GetNamesType(_columnTypes[col].VectorSize);
-                    if (kind == MetadataUtils.Kinds.KeyValues && _getKeyValuesDict.ContainsKey(_names[col]))
-                        return MetadataUtils.GetNamesType(_columnTypes[col].KeyCount);
-                    return null;
-                }
-
-                public void GetMetadata<TValue>(string kind, int col, ref TValue value)
-                {
-                    _ectx.CheckNonEmpty(kind, nameof(kind));
-                    _ectx.CheckParam(0 <= col && col < ColumnCount, nameof(col));
-
-                    if (kind == MetadataUtils.Kinds.SlotNames && _getSlotNamesDict.ContainsKey(_names[col]))
-                        MetadataUtils.Marshal<VBuffer<ReadOnlyMemory<char>>, TValue>(GetSlotNames, col, ref value);
-                    else if (kind == MetadataUtils.Kinds.KeyValues && _getKeyValuesDict.ContainsKey(_names[col]))
-                        MetadataUtils.Marshal<VBuffer<ReadOnlyMemory<char>>, TValue>(GetKeyValues, col, ref value);
-                    else
-                        throw MetadataUtils.ExceptGetMetadata();
-                }
-
-                private void GetSlotNames(int col, ref VBuffer<ReadOnlyMemory<char>> dst)
-                {
-                    Contracts.Assert(_getSlotNamesDict.ContainsKey(_names[col]));
-                    ValueGetter<VBuffer<ReadOnlyMemory<char>>> get;
-                    _getSlotNamesDict.TryGetValue(_names[col], out get);
-                    get(ref dst);
-                }
-
-                private void GetKeyValues(int col, ref VBuffer<ReadOnlyMemory<char>> dst)
-                {
-                    Contracts.Assert(_getKeyValuesDict.ContainsKey(_names[col]));
-                    ValueGetter<VBuffer<ReadOnlyMemory<char>>> get;
-                    _getKeyValuesDict.TryGetValue(_names[col], out get);
-                    get(ref dst);
-                }
-            }
-
             private readonly int _rowCount;
             private readonly Column[] _columns;
-            private readonly SchemaImpl _schema;
+            private readonly Schema _schema;
             private readonly IHost _host;
 
-            public ISchema Schema { get { return _schema; } }
+            public Schema Schema { get { return _schema; } }
 
-            public long? GetRowCount(bool lazy = true) { return _rowCount; }
+            public long? GetRowCount() { return _rowCount; }
 
             public bool CanShuffle { get { return true; } }
 
@@ -312,11 +208,25 @@ namespace Microsoft.ML.Runtime.Data
                 _host.Assert(rowCount >= 0);
                 _host.Assert(builder._names.Count == builder._columns.Count);
                 _columns = builder._columns.ToArray();
-                _schema = new SchemaImpl(_host, _columns.Select(c => c.Type).ToArray(), builder._names.ToArray(), builder);
+
+                var schemaBuilder = new SchemaBuilder();
+                for(int i=0; i< _columns.Length; i++)
+                {
+                    var meta = new MetadataBuilder();
+
+                    if (builder._getSlotNames.TryGetValue(builder._names[i], out var slotNamesGetter))
+                        meta.AddSlotNames(_columns[i].Type.VectorSize, slotNamesGetter);
+
+                    if (builder._getKeyValues.TryGetValue(builder._names[i], out var keyValueGetter))
+                        meta.AddKeyValues(_columns[i].Type.KeyCount, TextType.Instance, keyValueGetter);
+                    schemaBuilder.AddColumn(builder._names[i], _columns[i].Type, meta.GetMetadata());
+                }
+
+                _schema = schemaBuilder.GetSchema();
                 _rowCount = rowCount;
             }
 
-            public IRowCursor GetRowCursor(Func<int, bool> predicate, IRandom rand = null)
+            public IRowCursor GetRowCursor(Func<int, bool> predicate, Random rand = null)
             {
                 _host.CheckValue(predicate, nameof(predicate));
                 _host.CheckValueOrNull(rand);
@@ -324,7 +234,7 @@ namespace Microsoft.ML.Runtime.Data
             }
 
             public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator,
-                Func<int, bool> predicate, int n, IRandom rand = null)
+                Func<int, bool> predicate, int n, Random rand = null)
             {
                 _host.CheckValue(predicate, nameof(predicate));
                 _host.CheckValueOrNull(rand);
@@ -338,7 +248,7 @@ namespace Microsoft.ML.Runtime.Data
                 private readonly BitArray _active;
                 private readonly int[] _indices;
 
-                public ISchema Schema { get { return _view.Schema; } }
+                public Schema Schema => _view.Schema;
 
                 public override long Batch
                 {
@@ -346,7 +256,7 @@ namespace Microsoft.ML.Runtime.Data
                     get { return 0; }
                 }
 
-                public RowCursor(IChannelProvider provider, DataView view, Func<int, bool> predicate, IRandom rand)
+                public RowCursor(IChannelProvider provider, DataView view, Func<int, bool> predicate, Random rand)
                     : base(provider)
                 {
                     Ch.AssertValue(view);
@@ -481,7 +391,7 @@ namespace Microsoft.ML.Runtime.Data
             /// compromising this object's ownership of <c>src</c>. What that operation will be
             /// will depend on the types.
             /// </summary>
-            protected abstract void CopyOut(ref TIn src, ref TOut dst);
+            protected abstract void CopyOut(in TIn src, ref TOut dst);
 
             /// <summary>
             /// Produce the output value given the index. This overload utilizes the <c>CopyOut</c>
@@ -490,7 +400,7 @@ namespace Microsoft.ML.Runtime.Data
             public override void CopyOut(int index, ref TOut value)
             {
                 Contracts.Assert(0 <= index & index < _values.Length);
-                CopyOut(ref _values[index], ref value);
+                CopyOut(in _values[index], ref value);
             }
         }
 
@@ -505,7 +415,7 @@ namespace Microsoft.ML.Runtime.Data
             {
             }
 
-            protected override void CopyOut(ref T src, ref T dst)
+            protected override void CopyOut(in T src, ref T dst)
             {
                 dst = src;
             }
@@ -521,7 +431,7 @@ namespace Microsoft.ML.Runtime.Data
             {
             }
 
-            protected override void CopyOut(ref string src, ref ReadOnlyMemory<char> dst)
+            protected override void CopyOut(in string src, ref ReadOnlyMemory<char> dst)
             {
                 dst = src.AsMemory();
             }
@@ -570,7 +480,7 @@ namespace Microsoft.ML.Runtime.Data
             {
             }
 
-            protected override void CopyOut(ref VBuffer<T> src, ref VBuffer<T> dst)
+            protected override void CopyOut(in VBuffer<T> src, ref VBuffer<T> dst)
             {
                 src.CopyTo(ref dst);
             }
@@ -583,7 +493,7 @@ namespace Microsoft.ML.Runtime.Data
             {
             }
 
-            protected override void CopyOut(ref T[] src, ref VBuffer<T> dst)
+            protected override void CopyOut(in T[] src, ref VBuffer<T> dst)
             {
                 VBuffer<T>.Copy(src, 0, ref dst, Utils.Size(src));
             }
@@ -599,7 +509,7 @@ namespace Microsoft.ML.Runtime.Data
                 _bldr = new BufferBuilder<T>(combiner);
             }
 
-            protected override void CopyOut(ref T[] src, ref VBuffer<T> dst)
+            protected override void CopyOut(in T[] src, ref VBuffer<T> dst)
             {
                 var length = Utils.Size(src);
                 _bldr.Reset(length, false);

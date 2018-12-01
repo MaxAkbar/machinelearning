@@ -18,7 +18,8 @@ namespace Microsoft.ML.Runtime.EntryPoints
     /// This class defines attributes to annotate module inputs, outputs, entry points etc. when defining
     /// the module interface.
     /// </summary>
-    public static class TlcModule
+    [BestFriend]
+    internal static class TlcModule
     {
         /// <summary>
         /// An attribute used to annotate the component.
@@ -71,7 +72,7 @@ namespace Microsoft.ML.Runtime.EntryPoints
 
             /// <summary>
             /// This should indicate a name of an embedded resource that contains detailed documents
-            /// for the component, e.g., markdown document with the .md extension. The embedded resource
+            /// for the component, for example, markdown document with the .md extension. The embedded resource
             /// is assumed to be in the same assembly as the class on which this attribute is ascribed.
             /// </summary>
             public string DocName { get; set; }

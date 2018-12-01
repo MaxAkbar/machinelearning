@@ -2,7 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.CSharp;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Api;
 using Microsoft.ML.Runtime.Data;
@@ -64,7 +63,7 @@ namespace Microsoft.ML.Legacy.Data
         /// and distinguish empty values from missing values. When true, consecutive separators
         /// denote a missing value and an empty value is denoted by \"\".
         /// When false, consecutive separators denote an empty value.</param>
-        /// <param name="supportSparse">Whether the input may include sparse representations e.g.
+        /// <param name="supportSparse">Whether the input may include sparse representations for example,
         /// if one of the row contains "5 2:6 4:3" that's mean there are 5 columns all zero
         /// except for 3rd and 5th columns which have values 6 and 3</param>
         /// <param name="trimWhitespace">Remove trailing whitespace from lines</param>

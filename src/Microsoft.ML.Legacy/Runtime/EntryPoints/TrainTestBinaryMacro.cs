@@ -3,7 +3,6 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
-using System.Collections.Generic;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
@@ -12,6 +11,9 @@ using Newtonsoft.Json.Linq;
 
 [assembly: LoadableClass(typeof(void), typeof(TrainTestBinaryMacro), null, typeof(SignatureEntryPointModule), "TrainTestBinaryMacro")]
 
+// The warning #612 is disabled because the following code uses a lot of things in Legacy.Models and Legacy.Transforms while Legacy is marked as obsolete.
+// Because that dependency will be removed form ML.NET, one needs to rewrite all places where legacy APIs are used.
+#pragma warning disable 612
 namespace Microsoft.ML.Runtime.EntryPoints
 {
     public static class TrainTestBinaryMacro
@@ -74,7 +76,7 @@ namespace Microsoft.ML.Runtime.EntryPoints
         {
             // Parse the subgraph.
             var subGraphRunContext = new RunContext(env);
-            var subGraphNodes = EntryPointNode.ValidateNodes(env, subGraphRunContext, input.Nodes, node.Catalog);
+            var subGraphNodes = EntryPointNode.ValidateNodes(env, subGraphRunContext, input.Nodes);
 
             // Change the subgraph to use the training data as input.
             var varName = input.Inputs.Data.VarName;
@@ -109,7 +111,7 @@ namespace Microsoft.ML.Runtime.EntryPoints
             scoreNode.Data.VarName = testingVar.ToJson();
             scoreNode.PredictorModel.VarName = outputVarName;
             var scoreNodeOutput = exp.Add(scoreNode);
-            subGraphNodes.AddRange(EntryPointNode.ValidateNodes(env, node.Context, exp.GetNodes(), node.Catalog));
+            subGraphNodes.AddRange(EntryPointNode.ValidateNodes(env, node.Context, exp.GetNodes()));
 
             // Add the evaluator node.
             exp.Reset();
@@ -126,7 +128,7 @@ namespace Microsoft.ML.Runtime.EntryPoints
             if (node.OutputMap.TryGetValue("ConfusionMatrix", out outVariableName))
                 evalOutput.ConfusionMatrix.VarName = outVariableName;
             exp.Add(evalNode, evalOutput);
-            subGraphNodes.AddRange(EntryPointNode.ValidateNodes(env, node.Context, exp.GetNodes(), node.Catalog));
+            subGraphNodes.AddRange(EntryPointNode.ValidateNodes(env, node.Context, exp.GetNodes()));
 
             var stageId = Guid.NewGuid().ToString("N");
             foreach (var subGraphNode in subGraphNodes)
@@ -136,3 +138,4 @@ namespace Microsoft.ML.Runtime.EntryPoints
         }
     }
 }
+#pragma warning restore 612

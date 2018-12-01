@@ -99,7 +99,8 @@ namespace Microsoft.ML.Runtime.EntryPoints
         public Optional<string> GroupIdColumn = Optional<string>.Implicit(DefaultColumnNames.GroupId);
     }
 
-    public static class LearnerEntryPointsUtils
+    [BestFriend]
+    internal static class LearnerEntryPointsUtils
     {
         public static string FindColumn(IExceptionContext ectx, ISchema schema, Optional<string> value)
         {
@@ -187,10 +188,7 @@ namespace Microsoft.ML.Runtime.EntryPoints
                 }
 
                 var predictor = TrainUtils.Train(host, ch, cachedRoleMappedData, trainer, calibrator, maxCalibrationExamples);
-                var output = new TOut() { PredictorModel = new PredictorModel(host, roleMappedData, input.TrainingData, predictor) };
-
-                ch.Done();
-                return output;
+                return new TOut() { PredictorModel = new PredictorModel(host, roleMappedData, input.TrainingData, predictor) };
             }
         }
     }

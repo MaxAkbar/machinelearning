@@ -7,11 +7,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-
-using Microsoft.ML;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.EntryPoints;
 using Microsoft.ML.Runtime.Internal.Utilities;
 using Microsoft.ML.Runtime.Sweeper;
 
@@ -107,7 +104,12 @@ namespace Microsoft.ML.Runtime.Sweeper
             if (Exe == null || Exe.EndsWith("maml", StringComparison.OrdinalIgnoreCase) ||
                 Exe.EndsWith("maml.exe", StringComparison.OrdinalIgnoreCase))
             {
+                string currentDirectory = Path.GetDirectoryName(typeof(ExeConfigRunnerBase).Module.FullyQualifiedName);
+
                 using (var ch = Host.Start("Finish"))
+#pragma warning disable CS0618 // As this deals with invoking command lines, this may be OK, though this code has some other problems.
+                using (AssemblyLoadingUtils.CreateAssemblyRegistrar(Host, currentDirectory))
+#pragma warning restore CS0618
                 {
                     var runs = RunNums.ToArray();
                     var args = Utils.BuildArray(RunNums.Count + 2,
@@ -120,10 +122,9 @@ namespace Microsoft.ML.Runtime.Sweeper
                             return string.Format("{{{0}}}", GetFilePath(runs[i], "out"));
                         });
 
-                    ResultProcessorInternal.ResultProcessor.Main (args);
+                    ResultProcessorInternal.ResultProcessor.Main(args);
 
                     ch.Info(@"The summary of the run results has been saved to the file {0}\{1}.summary.txt", OutputFolder, Prefix);
-                    ch.Done();
                 }
             }
         }
@@ -165,9 +166,7 @@ namespace Microsoft.ML.Runtime.Sweeper
                 for (int i = 0; i < sweeps.Length; i++)
                     ch.Info("Parameter set: {0}", string.Join(", ", sweeps[i].Select(p => string.Format("{0}:{1}", p.Name, p.ValueText))));
 
-                var res = RunConfigsCore(sweeps, ch, min);
-                ch.Done();
-                return res;
+               return RunConfigsCore(sweeps, ch, min);
             }
         }
 

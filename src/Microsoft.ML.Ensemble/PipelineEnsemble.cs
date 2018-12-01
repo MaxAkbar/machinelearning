@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Ensemble;
@@ -41,14 +42,14 @@ namespace Microsoft.ML.Runtime.Ensemble
 
             public ISchemaBindableMapper Bindable => Parent;
             public RoleMappedSchema InputRoleMappedSchema { get; }
-            public ISchema InputSchema => InputRoleMappedSchema.Schema;
-            public ISchema Schema { get; }
+            public Schema InputSchema => InputRoleMappedSchema.Schema;
+            public Schema OutputSchema { get; }
 
             public BoundBase(SchemaBindablePipelineEnsembleBase parent, RoleMappedSchema schema)
             {
                 Parent = parent;
                 InputRoleMappedSchema = schema;
-                Schema = new ScoreMapperSchema(Parent.ScoreType, Parent._scoreColumnKind);
+                OutputSchema = Schema.Create(new ScoreMapperSchema(Parent.ScoreType, Parent._scoreColumnKind));
                 _inputColIndices = new HashSet<int>();
                 for (int i = 0; i < Parent._inputCols.Length; i++)
                 {
@@ -74,7 +75,7 @@ namespace Microsoft.ML.Runtime.Ensemble
                         throw Parent.Host.Except("Predictor {0} is not a row to row mapper", i);
 
                     // Make sure there is a score column, and remember its index.
-                    if (!Mappers[i].Schema.TryGetColumnIndex(MetadataUtils.Const.ScoreValueKind.Score, out ScoreCols[i]))
+                    if (!Mappers[i].OutputSchema.TryGetColumnIndex(MetadataUtils.Const.ScoreValueKind.Score, out ScoreCols[i]))
                         throw Parent.Host.Except("Predictor {0} does not contain a score column", i);
 
                     // Get the pipeline.
@@ -89,7 +90,7 @@ namespace Microsoft.ML.Runtime.Ensemble
 
             public Func<int, bool> GetDependencies(Func<int, bool> predicate)
             {
-                for (int i = 0; i < Schema.ColumnCount; i++)
+                for (int i = 0; i < OutputSchema.ColumnCount; i++)
                 {
                     if (predicate(i))
                         return col => _inputColIndices.Contains(col);
@@ -104,7 +105,7 @@ namespace Microsoft.ML.Runtime.Ensemble
 
             public IRow GetRow(IRow input, Func<int, bool> predicate, out Action disposer)
             {
-                return new SimpleRow(Schema, input, new[] { CreateScoreGetter(input, predicate, out disposer) });
+                return new SimpleRow(OutputSchema, input, new[] { CreateScoreGetter(input, predicate, out disposer) });
             }
 
             public abstract Delegate CreateScoreGetter(IRow input, Func<int, bool> mapperPredicate, out Action disposer);
@@ -659,13 +660,13 @@ namespace Microsoft.ML.Runtime.Ensemble
                 if (!mdType.Equals(keyValuesType))
                     throw env.Except("Label column of model {0} has different key value type than model 0", i);
                 rmd.Schema.Schema.GetMetadata(MetadataUtils.Kinds.KeyValues, labelInfo.Index, ref curLabelNames);
-                if (!AreEqual(ref labelNames, ref curLabelNames))
+                if (!AreEqual(in labelNames, in curLabelNames))
                     throw env.Except("Label of model {0} has different values than model 0", i);
             }
             return classCount;
         }
 
-        private static bool AreEqual<T>(ref VBuffer<T> v1, ref VBuffer<T> v2)
+        private static bool AreEqual<T>(in VBuffer<T> v1, in VBuffer<T> v2)
             where T : IEquatable<T>
         {
             if (v1.Length != v2.Length)

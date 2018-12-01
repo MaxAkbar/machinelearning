@@ -4,6 +4,7 @@
 
 using Microsoft.ML.Core.Data;
 using Microsoft.ML.Data.DataLoadSave;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Data.IO;
@@ -34,7 +35,7 @@ namespace Microsoft.ML.Runtime.Data
             IsRowToRowMapper = IsChainRowToRowMapper(_xf);
         }
 
-        public ISchema GetOutputSchema(ISchema inputSchema)
+        public Schema GetOutputSchema(Schema inputSchema)
         {
             _host.CheckValue(inputSchema, nameof(inputSchema));
 
@@ -121,7 +122,7 @@ namespace Microsoft.ML.Runtime.Data
 
         public bool IsRowToRowMapper { get; }
 
-        public IRowToRowMapper GetRowToRowMapper(ISchema inputSchema)
+        public IRowToRowMapper GetRowToRowMapper(Schema inputSchema)
         {
             _host.CheckValue(inputSchema, nameof(inputSchema));
             var input = new EmptyDataView(_host, inputSchema);
@@ -159,7 +160,7 @@ namespace Microsoft.ML.Runtime.Data
         {
             Host.CheckValue(inputSchema, nameof(inputSchema));
 
-            var fakeSchema = new FakeSchema(Host, inputSchema);
+            var fakeSchema = Schema.Create(new FakeSchema(Host, inputSchema));
             var transformer = Fit(new EmptyDataView(Host, fakeSchema));
             return SchemaShape.Create(transformer.GetOutputSchema(fakeSchema));
         }
@@ -178,7 +179,7 @@ namespace Microsoft.ML.Runtime.Data
         public override SchemaShape GetOutputSchema(SchemaShape inputSchema)
         {
             Host.CheckValue(inputSchema, nameof(inputSchema));
-            var fakeSchema = new FakeSchema(Host, inputSchema);
+            var fakeSchema = Schema.Create(new FakeSchema(Host, inputSchema));
             return SchemaShape.Create(Transformer.GetOutputSchema(fakeSchema));
         }
     }

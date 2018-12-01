@@ -2,16 +2,17 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Command;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Data.IO;
 using Microsoft.ML.Runtime.Internal.Utilities;
+using Microsoft.ML.Transforms;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 [assembly: LoadableClass(SaveDataCommand.Summary, typeof(SaveDataCommand), typeof(SaveDataCommand.Arguments), typeof(SignatureCommand),
     "Save Data", "SaveData", "save")]
@@ -21,7 +22,7 @@ using Microsoft.ML.Runtime.Internal.Utilities;
 
 namespace Microsoft.ML.Runtime.Data
 {
-    public sealed class SaveDataCommand : DataCommand.ImplBase<SaveDataCommand.Arguments>
+    internal sealed class SaveDataCommand : DataCommand.ImplBase<SaveDataCommand.Arguments>
     {
         public sealed class Arguments : DataCommand.ArgumentsBase
         {
@@ -50,7 +51,6 @@ namespace Microsoft.ML.Runtime.Data
             using (var ch = Host.Start(command))
             {
                 RunCore(ch);
-                ch.Done();
             }
         }
 
@@ -87,7 +87,7 @@ namespace Microsoft.ML.Runtime.Data
         }
     }
 
-    public sealed class ShowDataCommand : DataCommand.ImplBase<ShowDataCommand.Arguments>
+    internal sealed class ShowDataCommand : DataCommand.ImplBase<ShowDataCommand.Arguments>
     {
         public sealed class Arguments : DataCommand.ArgumentsBase
         {
@@ -120,7 +120,6 @@ namespace Microsoft.ML.Runtime.Data
             using (var ch = Host.Start(command))
             {
                 RunCore(ch);
-                ch.Done();
             }
         }
 
@@ -131,11 +130,10 @@ namespace Microsoft.ML.Runtime.Data
 
             if (!string.IsNullOrWhiteSpace(Args.Columns))
             {
-                var args = new ChooseColumnsTransform.Arguments();
-                args.Column = Args.Columns
-                    .Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(s => new ChooseColumnsTransform.Column() { Name = s }).ToArray();
-                if (Utils.Size(args.Column) > 0)
-                    data = new ChooseColumnsTransform(Host, args, data);
+                var keepColumns = Args.Columns
+                    .Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries).ToArray();
+                if (Utils.Size(keepColumns) > 0)
+                    data = ColumnSelectingTransformer.CreateKeep(Host, data, keepColumns);
             }
 
             IDataSaver saver;
@@ -144,7 +142,7 @@ namespace Microsoft.ML.Runtime.Data
             else
                 saver = new TextSaver(Host, new TextSaver.Arguments() { Dense = Args.Dense });
             var cols = new List<int>();
-            for (int i = 0; i < data.Schema.ColumnCount; i++)
+            for (int i = 0; i < data.Schema.Count; i++)
             {
                 if (!Args.KeepHidden && data.Schema.IsHidden(i))
                     continue;

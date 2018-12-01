@@ -3,6 +3,7 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime.Internal.Utilities;
 
 namespace Microsoft.ML.Runtime.Data
@@ -15,9 +16,9 @@ namespace Microsoft.ML.Runtime.Data
         private readonly IHost _host;
 
         public bool CanShuffle => true;
-        public ISchema Schema { get; }
+        public Schema Schema { get; }
 
-        public EmptyDataView(IHostEnvironment env, ISchema schema)
+        public EmptyDataView(IHostEnvironment env, Schema schema)
         {
             Contracts.CheckValue(env, nameof(env));
             _host = env.Register(nameof(EmptyDataView));
@@ -25,16 +26,16 @@ namespace Microsoft.ML.Runtime.Data
             Schema = schema;
         }
 
-        public long? GetRowCount(bool lazy = true) => 0;
+        public long? GetRowCount() => 0;
 
-        public IRowCursor GetRowCursor(Func<int, bool> needCol, IRandom rand = null)
+        public IRowCursor GetRowCursor(Func<int, bool> needCol, Random rand = null)
         {
             _host.CheckValue(needCol, nameof(needCol));
             _host.CheckValueOrNull(rand);
             return new Cursor(_host, Schema, needCol);
         }
 
-        public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> needCol, int n, IRandom rand = null)
+        public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> needCol, int n, Random rand = null)
         {
             _host.CheckValue(needCol, nameof(needCol));
             _host.CheckValueOrNull(rand);
@@ -46,10 +47,10 @@ namespace Microsoft.ML.Runtime.Data
         {
             private readonly bool[] _active;
 
-            public ISchema Schema { get; }
+            public Schema Schema { get; }
             public override long Batch => 0;
 
-            public Cursor(IChannelProvider provider, ISchema schema, Func<int, bool> needCol)
+            public Cursor(IChannelProvider provider, Schema schema, Func<int, bool> needCol)
                 : base(provider)
             {
                 Ch.AssertValue(schema);

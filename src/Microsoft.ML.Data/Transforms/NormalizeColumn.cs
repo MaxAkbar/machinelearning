@@ -10,6 +10,7 @@ using Microsoft.ML.Runtime.Internal.Internallearn;
 using Microsoft.ML.Runtime.Model;
 using Microsoft.ML.Runtime.Model.Onnx;
 using Microsoft.ML.Runtime.Model.Pfa;
+using Microsoft.ML.Transforms.Normalizers;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
@@ -38,7 +39,7 @@ using System.Text;
 [assembly: LoadableClass(NormalizeTransform.BinNormalizerSummary, typeof(NormalizeTransform.BinColumnFunction), null, typeof(SignatureLoadColumnFunction),
     "Bin Normalizer", NormalizeTransform.BinColumnFunction.LoaderSignature)]
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Transforms.Normalizers
 {
     public sealed partial class NormalizeTransform
     {
@@ -228,24 +229,24 @@ namespace Microsoft.ML.Runtime.Data
             public int MinBinSize = Defaults.MinBinSize;
         }
 
-        public const string MinMaxNormalizerSummary = "Normalizes the data based on the observed minimum and maximum values of the data.";
-        public const string MeanVarNormalizerSummary = "Normalizes the data based on the computed mean and variance of the data.";
-        public const string LogMeanVarNormalizerSummary = "Normalizes the data based on the computed mean and variance of the logarithm of the data.";
-        public const string BinNormalizerSummary = "The values are assigned into equidensity bins and a value is mapped to its bin_number/number_of_bins.";
-        public const string SupervisedBinNormalizerSummary = "Similar to BinNormalizer, but calculates bins based on correlation with the label column, not equi-density. "
+        internal const string MinMaxNormalizerSummary = "Normalizes the data based on the observed minimum and maximum values of the data.";
+        internal const string MeanVarNormalizerSummary = "Normalizes the data based on the computed mean and variance of the data.";
+        internal const string LogMeanVarNormalizerSummary = "Normalizes the data based on the computed mean and variance of the logarithm of the data.";
+        internal const string BinNormalizerSummary = "The values are assigned into equidensity bins and a value is mapped to its bin_number/number_of_bins.";
+        internal const string SupervisedBinNormalizerSummary = "Similar to BinNormalizer, but calculates bins based on correlation with the label column, not equi-density. "
             + "The new value is bin_number / number_of_bins.";
 
-        public const string MinMaxNormalizerUserName = "Min-Max Normalizer";
-        public const string MeanVarNormalizerUserName = "MeanVar Normalizer";
-        public const string LogMeanVarNormalizerUserName = "LogMeanVar Normalizer";
-        public const string BinNormalizerUserName = "Binning Normalizer";
-        public const string SupervisedBinNormalizerUserName = "Supervised Binning Normalizer";
+        internal const string MinMaxNormalizerUserName = "Min-Max Normalizer";
+        internal const string MeanVarNormalizerUserName = "MeanVar Normalizer";
+        internal const string LogMeanVarNormalizerUserName = "LogMeanVar Normalizer";
+        internal const string BinNormalizerUserName = "Binning Normalizer";
+        internal const string SupervisedBinNormalizerUserName = "Supervised Binning Normalizer";
 
-        public const string MinMaxNormalizerShortName = "MinMax";
-        public const string MeanVarNormalizerShortName = "MeanVar";
-        public const string LogMeanVarNormalizerShortName = "LogMeanVar";
-        public const string BinNormalizerShortName = "Bin";
-        public const string SupervisedBinNormalizerShortName = "SupBin";
+        internal const string MinMaxNormalizerShortName = "MinMax";
+        internal const string MeanVarNormalizerShortName = "MeanVar";
+        internal const string LogMeanVarNormalizerShortName = "LogMeanVar";
+        internal const string BinNormalizerShortName = "Bin";
+        internal const string SupervisedBinNormalizerShortName = "SupBin";
 
         /// <summary>
         /// A helper method to create a MinMax normalizer.
@@ -258,35 +259,8 @@ namespace Microsoft.ML.Runtime.Data
         {
             Contracts.CheckValue(env, nameof(env));
 
-            var normalizer = new Normalizer(env, new Normalizer.MinMaxColumn(source ?? name, name));
+            var normalizer = new NormalizingEstimator(env, new NormalizingEstimator.MinMaxColumn(source ?? name, name));
             return normalizer.Fit(input).MakeDataTransform(input);
-        }
-
-        /// <summary>
-        /// Potentially apply a min-max normalizer to the data's feature column, keeping all existing role
-        /// mappings except for the feature role mapping.
-        /// </summary>
-        /// <param name="env">The host environment to use to potentially instantiate the transform</param>
-        /// <param name="data">The role-mapped data that is potentially going to be modified by this method.</param>
-        /// <param name="trainer">The trainer to query as to whether it wants normalization. If the
-        /// <see cref="ITrainer.Info"/>'s <see cref="TrainerInfo.NeedNormalization"/> is <c>true</c></param>
-        /// <returns>True if the normalizer was applied and <paramref name="data"/> was modified</returns>
-        public static bool CreateIfNeeded(IHostEnvironment env, ref RoleMappedData data, ITrainer trainer)
-        {
-            Contracts.CheckValue(env, nameof(env));
-            env.CheckValue(data, nameof(data));
-            env.CheckValue(trainer, nameof(trainer));
-
-            // If the trainer does not need normalization, or if the features either don't exist
-            // or are not normalized, return false.
-            if (!trainer.Info.NeedNormalization || data.Schema.FeaturesAreNormalized() != false)
-                return false;
-            var featInfo = data.Schema.Feature;
-            env.AssertValue(featInfo); // Should be defined, if FeaturesAreNormalized returned a definite value.
-
-            var view = CreateMinMaxNormalizer(env, data.Data, name: featInfo.Name);
-            data = new RoleMappedData(view, data.Schema.GetColumnRoleNames());
-            return true;
         }
 
         /// <summary>
@@ -299,13 +273,13 @@ namespace Microsoft.ML.Runtime.Data
             env.CheckValue(args.Column, nameof(args.Column));
 
             var columns = args.Column
-                .Select(col => new Normalizer.MinMaxColumn(
+                .Select(col => new NormalizingEstimator.MinMaxColumn(
                     col.Source ?? col.Name,
                     col.Name,
                     col.MaxTrainingExamples ?? args.MaxTrainingExamples,
                     col.FixZero ?? args.FixZero))
                 .ToArray();
-            var normalizer = new Normalizer(env, columns);
+            var normalizer = new NormalizingEstimator(env, columns);
             return normalizer.Fit(input).MakeDataTransform(input);
         }
 
@@ -319,13 +293,13 @@ namespace Microsoft.ML.Runtime.Data
             env.CheckValue(args.Column, nameof(args.Column));
 
             var columns = args.Column
-                .Select(col => new Normalizer.MeanVarColumn(
+                .Select(col => new NormalizingEstimator.MeanVarColumn(
                     col.Source ?? col.Name,
                     col.Name,
                     col.MaxTrainingExamples ?? args.MaxTrainingExamples,
                     col.FixZero ?? args.FixZero))
                 .ToArray();
-            var normalizer = new Normalizer(env, columns);
+            var normalizer = new NormalizingEstimator(env, columns);
             return normalizer.Fit(input).MakeDataTransform(input);
         }
 
@@ -339,13 +313,13 @@ namespace Microsoft.ML.Runtime.Data
             env.CheckValue(args.Column, nameof(args.Column));
 
             var columns = args.Column
-                .Select(col => new Normalizer.LogMeanVarColumn(
+                .Select(col => new NormalizingEstimator.LogMeanVarColumn(
                     col.Source ?? col.Name,
                     col.Name,
                     col.MaxTrainingExamples ?? args.MaxTrainingExamples,
                     args.UseCdf))
                 .ToArray();
-            var normalizer = new Normalizer(env, columns);
+            var normalizer = new NormalizingEstimator(env, columns);
             return normalizer.Fit(input).MakeDataTransform(input);
         }
 
@@ -359,14 +333,14 @@ namespace Microsoft.ML.Runtime.Data
             env.CheckValue(args.Column, nameof(args.Column));
 
             var columns = args.Column
-                .Select(col => new Normalizer.BinningColumn(
+                .Select(col => new NormalizingEstimator.BinningColumn(
                     col.Source ?? col.Name,
                     col.Name,
                     col.MaxTrainingExamples ?? args.MaxTrainingExamples,
                     col.FixZero ?? args.FixZero,
                     col.NumBins ?? args.NumBins))
                 .ToArray();
-            var normalizer = new Normalizer(env, columns);
+            var normalizer = new NormalizingEstimator(env, columns);
             return normalizer.Fit(input).MakeDataTransform(input);
         }
 
@@ -384,12 +358,14 @@ namespace Microsoft.ML.Runtime.Data
             public abstract void Save(ModelSaveContext ctx);
 
             public abstract JToken PfaInfo(BoundPfaContext ctx, JToken srcToken);
-            public bool CanSaveOnnx => true;
+            public bool CanSaveOnnx(OnnxContext ctx) => true;
             public abstract bool OnnxInfo(OnnxContext ctx, OnnxNode nodeProtoWrapper, int featureCount);
 
             public abstract Delegate GetGetter(IRow input, int icol);
 
             public abstract void AttachMetadata(MetadataDispatcher.Builder bldr, ColumnType typeSrc);
+
+            public abstract NormalizingTransformer.NormalizerModelParametersBase GetNormalizerModelParams();
 
             public static AffineColumnFunction Create(ModelLoadContext ctx, IHost host, ColumnType typeSrc)
             {
@@ -411,14 +387,10 @@ namespace Microsoft.ML.Runtime.Data
                 throw host.ExceptUserArg(nameof(AffineArgumentsBase.Column), "Wrong column type. Expected: R4, R8, Vec<R4, n> or Vec<R8, n>. Got: {0}.", typeSrc.ToString());
             }
 
-            private abstract class ImplOne<TFloat> : AffineColumnFunction, NormalizerTransformer.IAffineData<TFloat>
+            private abstract class ImplOne<TFloat> : AffineColumnFunction
             {
                 protected readonly TFloat Scale;
                 protected readonly TFloat Offset;
-
-                TFloat NormalizerTransformer.IAffineData<TFloat>.Scale => Scale;
-                TFloat NormalizerTransformer.IAffineData<TFloat>.Offset => Offset;
-
                 protected ImplOne(IHost host, TFloat scale, TFloat offset)
                     : base(host)
                 {
@@ -434,17 +406,17 @@ namespace Microsoft.ML.Runtime.Data
                     bldr.AddPrimitive("AffineScale", typeSrc, Scale);
                     bldr.AddPrimitive("AffineOffset", typeSrc, Offset);
                 }
+
+                public override NormalizingTransformer.NormalizerModelParametersBase GetNormalizerModelParams()
+                    => new NormalizingTransformer.AffineNormalizerModelParameters<TFloat>(Scale, Offset);
+
             }
 
-            private abstract class ImplVec<TFloat> : AffineColumnFunction, NormalizerTransformer.IAffineData<ImmutableArray<TFloat>>
+            private abstract class ImplVec<TFloat> : AffineColumnFunction
             {
                 protected readonly TFloat[] Scale;
                 protected readonly TFloat[] Offset;
                 protected readonly int[] IndicesNonZeroOffset;
-
-                ImmutableArray<TFloat> NormalizerTransformer.IAffineData<ImmutableArray<TFloat>>.Scale => ImmutableArray.Create(Scale);
-                ImmutableArray<TFloat> NormalizerTransformer.IAffineData<ImmutableArray<TFloat>>.Offset
-                    => Offset == null ? ImmutableArray.Create<TFloat>() : ImmutableArray.Create(Offset);
 
                 protected ImplVec(IHost host, TFloat[] scale, TFloat[] offset, int[] indicesNonZeroOffset)
                     : base(host)
@@ -482,6 +454,9 @@ namespace Microsoft.ML.Runtime.Data
                     var src = new VBuffer<TFloat>(Offset.Length, Offset);
                     src.CopyTo(ref dst);
                 }
+
+                public override NormalizingTransformer.NormalizerModelParametersBase GetNormalizerModelParams()
+                    => new NormalizingTransformer.AffineNormalizerModelParameters<ImmutableArray<TFloat>> (ImmutableArray.Create(Scale), ImmutableArray.Create(Offset));
             }
         }
 
@@ -498,17 +473,16 @@ namespace Microsoft.ML.Runtime.Data
 
             public abstract void Save(ModelSaveContext ctx);
 
-            public JToken PfaInfo(BoundPfaContext ctx, JToken srcToken)
-            {
-                return null;
-            }
+            public JToken PfaInfo(BoundPfaContext ctx, JToken srcToken) => null;
 
-            public bool CanSaveOnnx => false;
+            public bool CanSaveOnnx(OnnxContext ctx) => false;
 
             public bool OnnxInfo(OnnxContext ctx, OnnxNode nodeProtoWrapper, int featureCount)
                 => throw Host.ExceptNotSupp();
 
             public abstract Delegate GetGetter(IRow input, int icol);
+            public abstract void AttachMetadata(MetadataDispatcher.Builder bldr, ColumnType typeSrc);
+            public abstract NormalizingTransformer.NormalizerModelParametersBase GetNormalizerModelParams();
 
             public static CdfColumnFunction Create(ModelLoadContext ctx, IHost host, ColumnType typeSrc)
             {
@@ -530,9 +504,7 @@ namespace Microsoft.ML.Runtime.Data
                 throw host.ExceptUserArg(nameof(AffineArgumentsBase.Column), "Wrong column type. Expected: R4, R8, Vec<R4, n> or Vec<R8, n>. Got: {0}.", typeSrc);
             }
 
-            public abstract void AttachMetadata(MetadataDispatcher.Builder bldr, ColumnType typeSrc);
-
-            private abstract class ImplOne<TFloat> : CdfColumnFunction, NormalizerTransformer.ICdfData<TFloat>
+            private abstract class ImplOne<TFloat> : CdfColumnFunction
             {
                 protected readonly TFloat Mean;
                 protected readonly TFloat Stddev;
@@ -546,10 +518,6 @@ namespace Microsoft.ML.Runtime.Data
                     UseLog = useLog;
                 }
 
-                TFloat NormalizerTransformer.ICdfData<TFloat>.Mean => Mean;
-                TFloat NormalizerTransformer.ICdfData<TFloat>.Stddev => Stddev;
-                bool NormalizerTransformer.ICdfData<TFloat>.UseLog => UseLog;
-
                 public override void AttachMetadata(MetadataDispatcher.Builder bldr, ColumnType typeSrc)
                 {
                     Host.CheckValue(bldr, nameof(bldr));
@@ -559,17 +527,16 @@ namespace Microsoft.ML.Runtime.Data
                     bldr.AddPrimitive("CdfStdDev", typeSrc, Stddev);
                     bldr.AddPrimitive("CdfUseLog", BoolType.Instance, UseLog);
                 }
+
+                public override NormalizingTransformer.NormalizerModelParametersBase GetNormalizerModelParams()
+                    => new NormalizingTransformer.CdfNormalizerModelParameters<TFloat>(Mean, Stddev, UseLog);
             }
 
-            private abstract class ImplVec<TFloat> : CdfColumnFunction, NormalizerTransformer.ICdfData<ImmutableArray<TFloat>>
+            private abstract class ImplVec<TFloat> : CdfColumnFunction
             {
                 protected readonly TFloat[] Mean;
                 protected readonly TFloat[] Stddev;
                 protected readonly bool UseLog;
-
-                ImmutableArray<TFloat> NormalizerTransformer.ICdfData<ImmutableArray<TFloat>>.Mean => ImmutableArray.Create(Mean);
-                ImmutableArray<TFloat> NormalizerTransformer.ICdfData<ImmutableArray<TFloat>>.Stddev => ImmutableArray.Create(Stddev);
-                bool NormalizerTransformer.ICdfData<ImmutableArray<TFloat>>.UseLog => UseLog;
 
                 protected ImplVec(IHost host, TFloat[] mean, TFloat[] stddev, bool useLog)
                     : base(host)
@@ -604,6 +571,9 @@ namespace Microsoft.ML.Runtime.Data
                     var src = new VBuffer<TFloat>(Stddev.Length, Stddev);
                     src.CopyTo(ref dst);
                 }
+
+                public override NormalizingTransformer.NormalizerModelParametersBase GetNormalizerModelParams()
+                    => new NormalizingTransformer.CdfNormalizerModelParameters<ImmutableArray<TFloat>>(ImmutableArray.Create(Mean), ImmutableArray.Create(Stddev), UseLog);
             }
 
             public const string LoaderSignature = "CdfNormalizeFunction";
@@ -632,12 +602,9 @@ namespace Microsoft.ML.Runtime.Data
 
             public abstract void Save(ModelSaveContext ctx);
 
-            public JToken PfaInfo(BoundPfaContext ctx, JToken srcToken)
-            {
-                return null;
-            }
+            public JToken PfaInfo(BoundPfaContext ctx, JToken srcToken) => null;
 
-            public bool CanSaveOnnx => false;
+            public bool CanSaveOnnx(OnnxContext ctx) => false;
 
             public bool OnnxInfo(OnnxContext ctx, OnnxNode nodeProtoWrapper, int featureCount)
                 => throw Host.ExceptNotSupp();
@@ -648,6 +615,8 @@ namespace Microsoft.ML.Runtime.Data
             {
                 // REVIEW: How to attach information on the bins, to metadata?
             }
+
+            public abstract NormalizingTransformer.NormalizerModelParametersBase GetNormalizerModelParams();
 
             public static BinColumnFunction Create(ModelLoadContext ctx, IHost host, ColumnType typeSrc)
             {
@@ -703,10 +672,10 @@ namespace Microsoft.ML.Runtime.Data
             {
                 TFloat tmp = default(TFloat);
                 _getSrc(ref tmp);
-                return ProcessValue(ref tmp);
+                return ProcessValue(in tmp);
             }
 
-            protected virtual bool ProcessValue(ref TFloat val)
+            protected virtual bool ProcessValue(in TFloat val)
             {
                 Host.Assert(Rem >= 0);
                 if (Rem == 0)
@@ -738,10 +707,10 @@ namespace Microsoft.ML.Runtime.Data
             public bool ProcessValue()
             {
                 _getSrc(ref _buffer);
-                return ProcessValue(ref _buffer);
+                return ProcessValue(in _buffer);
             }
 
-            protected virtual bool ProcessValue(ref VBuffer<TFloat> buffer)
+            protected virtual bool ProcessValue(in VBuffer<TFloat> buffer)
             {
                 Host.Assert(Rem >= 0);
                 if (Rem == 0)
@@ -858,13 +827,13 @@ namespace Microsoft.ML.Runtime.Data
             {
                 TFloat colValue = default(TFloat);
                 _colGetterSrc(ref colValue);
-                var result = AcceptColumnValue(ref colValue);
+                var result = AcceptColumnValue(in colValue);
                 if (result)
                     ColValues.Add(colValue);
                 return result;
             }
 
-            protected abstract bool AcceptColumnValue(ref TFloat colValue);
+            protected abstract bool AcceptColumnValue(in TFloat colValue);
         }
 
         private abstract class VecColumnSupervisedBinFunctionBuilderBase<TFloat> : SupervisedBinFunctionBuilderBase
@@ -893,21 +862,21 @@ namespace Microsoft.ML.Runtime.Data
             protected override bool AcceptColumnValue()
             {
                 _colValueGetter(ref _buffer);
-                bool result = AcceptColumnValue(ref _buffer);
+                bool result = AcceptColumnValue(in _buffer);
                 if (result)
                 {
                     if (_buffer.IsDense)
                     {
-                        var values = _buffer.Values;
+                        var values = _buffer.GetValues();
                         for (int i = 0; i < ColumnSlotCount; i++)
                             ColValues[i].Add(values[i]);
                     }
                     else
                     {
-                        var indices = _buffer.Indices;
-                        var values = _buffer.Values;
+                        var indices = _buffer.GetIndices();
+                        var values = _buffer.GetValues();
                         int k = 0;
-                        for (int i = 0; i < _buffer.Count; i++)
+                        for (int i = 0; i < values.Length; i++)
                         {
                             var val = values[i];
                             var index = indices[i];
@@ -924,7 +893,7 @@ namespace Microsoft.ML.Runtime.Data
                 return result;
             }
 
-            protected abstract bool AcceptColumnValue(ref VBuffer<TFloat> buffer);
+            protected abstract bool AcceptColumnValue(in VBuffer<TFloat> buffer);
         }
 
         internal static partial class MinMaxUtils
@@ -935,14 +904,14 @@ namespace Microsoft.ML.Runtime.Data
                 Contracts.AssertValue(host);
                 host.AssertValue(args);
 
-                return CreateBuilder(new Normalizer.MinMaxColumn(
+                return CreateBuilder(new NormalizingEstimator.MinMaxColumn(
                     args.Column[icol].Source ?? args.Column[icol].Name,
                     args.Column[icol].Name,
                     args.Column[icol].MaxTrainingExamples ?? args.MaxTrainingExamples,
                     args.Column[icol].FixZero ?? args.FixZero), host, srcIndex, srcType, cursor);
             }
 
-            public static IColumnFunctionBuilder CreateBuilder(Normalizer.MinMaxColumn column, IHost host,
+            public static IColumnFunctionBuilder CreateBuilder(NormalizingEstimator.MinMaxColumn column, IHost host,
                 int srcIndex, ColumnType srcType, IRowCursor cursor)
             {
                 if (srcType.IsNumber)
@@ -971,7 +940,7 @@ namespace Microsoft.ML.Runtime.Data
                 Contracts.AssertValue(host);
                 host.AssertValue(args);
 
-                return CreateBuilder(new Normalizer.MeanVarColumn(
+                return CreateBuilder(new NormalizingEstimator.MeanVarColumn(
                     args.Column[icol].Source ?? args.Column[icol].Name,
                     args.Column[icol].Name,
                     args.Column[icol].MaxTrainingExamples ?? args.MaxTrainingExamples,
@@ -979,7 +948,7 @@ namespace Microsoft.ML.Runtime.Data
                     args.UseCdf), host, srcIndex, srcType, cursor);
             }
 
-            public static IColumnFunctionBuilder CreateBuilder(Normalizer.MeanVarColumn column, IHost host,
+            public static IColumnFunctionBuilder CreateBuilder(NormalizingEstimator.MeanVarColumn column, IHost host,
                 int srcIndex, ColumnType srcType, IRowCursor cursor)
             {
                 Contracts.AssertValue(host);
@@ -1011,14 +980,14 @@ namespace Microsoft.ML.Runtime.Data
                 Contracts.AssertValue(host);
                 host.AssertValue(args);
 
-                return CreateBuilder(new Normalizer.LogMeanVarColumn(
+                return CreateBuilder(new NormalizingEstimator.LogMeanVarColumn(
                     args.Column[icol].Source ?? args.Column[icol].Name,
                     args.Column[icol].Name,
                     args.Column[icol].MaxTrainingExamples ?? args.MaxTrainingExamples,
                     args.UseCdf), host, srcIndex, srcType, cursor);
             }
 
-            public static IColumnFunctionBuilder CreateBuilder(Normalizer.LogMeanVarColumn column, IHost host,
+            public static IColumnFunctionBuilder CreateBuilder(NormalizingEstimator.LogMeanVarColumn column, IHost host,
                 int srcIndex, ColumnType srcType, IRowCursor cursor)
             {
                 Contracts.AssertValue(host);
@@ -1050,7 +1019,7 @@ namespace Microsoft.ML.Runtime.Data
                 Contracts.AssertValue(host);
                 host.AssertValue(args);
 
-                return CreateBuilder(new Normalizer.BinningColumn(
+                return CreateBuilder(new NormalizingEstimator.BinningColumn(
                     args.Column[icol].Source ?? args.Column[icol].Name,
                     args.Column[icol].Name,
                     args.Column[icol].MaxTrainingExamples ?? args.MaxTrainingExamples,
@@ -1058,7 +1027,7 @@ namespace Microsoft.ML.Runtime.Data
                     args.Column[icol].NumBins ?? args.NumBins), host, srcIndex, srcType, cursor);
             }
 
-            public static IColumnFunctionBuilder CreateBuilder(Normalizer.BinningColumn column, IHost host,
+            public static IColumnFunctionBuilder CreateBuilder(NormalizingEstimator.BinningColumn column, IHost host,
                 int srcIndex, ColumnType srcType, IRowCursor cursor)
             {
                 Contracts.AssertValue(host);

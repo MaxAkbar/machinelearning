@@ -6,8 +6,10 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
@@ -181,7 +183,7 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
             }
 
             public ColumnInfo(string input, string output, ColorBits colors = ColorBits.Rgb, bool interleave = false)
-                : this(input, output, colors, interleave, false, 1f, 0f)
+                : this(input, output, colors, interleave, true, 1f, 0f)
             {
             }
 
@@ -343,7 +345,7 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
             }
 
             var transformer = new ImagePixelExtractorTransform(env, columns);
-            return new RowToRowMapperTransform(env, input, transformer.MakeRowMapper(input.Schema));
+            return new RowToRowMapperTransform(env, input, transformer.MakeRowMapper(input.Schema), transformer.MakeRowMapper);
         }
 
         // Factory method for SignatureLoadModel.
@@ -377,7 +379,7 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
 
         // Factory method for SignatureLoadRowMapper.
         private static IRowMapper Create(IHostEnvironment env, ModelLoadContext ctx, ISchema inputSchema)
-            => Create(env, ctx).MakeRowMapper(inputSchema);
+            => Create(env, ctx).MakeRowMapper(Schema.Create(inputSchema));
 
         public override void Save(ModelSaveContext ctx)
         {
@@ -398,8 +400,7 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
                 info.Save(ctx);
         }
 
-        protected override IRowMapper MakeRowMapper(ISchema schema)
-            => new Mapper(this, schema);
+        protected override IRowMapper MakeRowMapper(Schema schema) => new Mapper(this, schema);
 
         protected override void CheckInputColumn(ISchema inputSchema, int col, int srcCol)
         {
@@ -413,22 +414,22 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
                 throw Host.Except("Image dimensions are too large");
         }
 
-        private sealed class Mapper : MapperBase
+        private sealed class Mapper : OneToOneMapperBase
         {
             private readonly ImagePixelExtractorTransform _parent;
             private readonly VectorType[] _types;
 
-            public Mapper(ImagePixelExtractorTransform parent, ISchema inputSchema)
+            public Mapper(ImagePixelExtractorTransform parent, Schema inputSchema)
                 : base(parent.Host.Register(nameof(Mapper)), parent, inputSchema)
             {
                 _parent = parent;
                 _types = ConstructTypes();
             }
 
-            public override RowMapperColumnInfo[] GetOutputColumns()
-                => _parent._columns.Select((x, idx) => new RowMapperColumnInfo(x.Output, _types[idx], null)).ToArray();
+            protected override Schema.DetachedColumn[] GetOutputColumnsCore()
+                => _parent._columns.Select((x, idx) => new Schema.DetachedColumn(x.Output, _types[idx], null)).ToArray();
 
-            protected override Delegate MakeGetter(IRow input, int iinfo, out Action disposer)
+            protected override Delegate MakeGetter(IRow input, int iinfo, Func<int, bool> activeOutput, out Action disposer)
             {
                 Contracts.AssertValue(input);
                 Contracts.Assert(0 <= iinfo && iinfo < _parent._columns.Length);
@@ -440,17 +441,19 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
 
             //REVIEW Rewrite it to where TValue : IConvertible
             private ValueGetter<VBuffer<TValue>> GetGetterCore<TValue>(IRow input, int iinfo, out Action disposer)
+                where TValue : struct
             {
                 var type = _types[iinfo];
-                Contracts.Assert(type.DimCount == 3);
+                var dims = type.Dimensions;
+                Contracts.Assert(dims.Length == 3);
 
                 var ex = _parent._columns[iinfo];
 
-                int planes = ex.Interleave ? type.GetDim(2) : type.GetDim(0);
-                int height = ex.Interleave ? type.GetDim(0) : type.GetDim(1);
-                int width = ex.Interleave ? type.GetDim(1) : type.GetDim(2);
+                int planes = ex.Interleave ? dims[2] : dims[0];
+                int height = ex.Interleave ? dims[0] : dims[1];
+                int width = ex.Interleave ? dims[1] : dims[2];
 
-                int size = type.ValueCount;
+                int size = type.Size;
                 Contracts.Assert(size > 0);
                 Contracts.Assert(size == planes * height * width);
                 int cpix = height * width;
@@ -476,26 +479,26 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
 
                         if (src == null)
                         {
-                            dst = new VBuffer<TValue>(size, 0, dst.Values, dst.Indices);
+                            VBufferUtils.Resize(ref dst, size, 0);
                             return;
                         }
 
                         Host.Check(src.PixelFormat == System.Drawing.Imaging.PixelFormat.Format32bppArgb);
                         Host.Check(src.Height == height && src.Width == width);
 
-                        var values = dst.Values;
-                        if (Utils.Size(values) < size)
-                            values = new TValue[size];
+                        var editor = VBufferEditor.Create(ref dst, size);
+                        var values = editor.Values;
 
                         float offset = ex.Offset;
                         float scale = ex.Scale;
                         Contracts.Assert(scale != 0);
 
-                        var vf = values as float[];
-                        var vb = values as byte[];
-                        Contracts.Assert(vf != null || vb != null);
+                        // REVIEW: split the getter into 2 specialized getters, one for float case and one for byte case.
+                        Span<float> vf = typeof(TValue) == typeof(float) ? MemoryMarshal.Cast<TValue, float>(editor.Values) : default;
+                        Span<byte> vb = typeof(TValue) == typeof(byte) ? MemoryMarshal.Cast<TValue, byte>(editor.Values) : default;
+                        Contracts.Assert(!vf.IsEmpty || !vb.IsEmpty);
                         bool needScale = offset != 0 || scale != 1;
-                        Contracts.Assert(!needScale || vf != null);
+                        Contracts.Assert(!needScale || !vf.IsEmpty);
 
                         bool a = ex.Alpha;
                         bool r = ex.Red;
@@ -512,7 +515,7 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
                                 for (int y = 0; y < h; ++y)
                                 {
                                     var pb = src.GetPixel(x, y);
-                                    if (vb != null)
+                                    if (!vb.IsEmpty)
                                     {
                                         if (a) { vb[idst++] = pb.A; }
                                         if (r) { vb[idst++] = pb.R; }
@@ -543,7 +546,7 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
                             {
                                 // The image only has rgb but we need to supply alpha as well, so fake it up,
                                 // assuming that it is 0xFF.
-                                if (vf != null)
+                                if (!vf.IsEmpty)
                                 {
                                     Single v = (0xFF - offset) * scale;
                                     for (int i = 0; i < cpix; i++)
@@ -566,7 +569,7 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
                                 int idstBase = idstMin + y * w;
 
                                 // Note that the bytes are in order BGR[A]. We arrange the layers in order ARGB.
-                                if (vb != null)
+                                if (!vb.IsEmpty)
                                 {
                                     for (int x = 0; x < w; x++, idstBase++)
                                     {
@@ -605,7 +608,7 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
                             }
                         }
 
-                        dst = new VBuffer<TValue>(size, values, dst.Indices);
+                        dst = editor.Commit();
                     };
             }
 
@@ -617,7 +620,7 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
                     var column = _parent._columns[i];
                     Contracts.Assert(column.Planes > 0);
 
-                    var type = InputSchema.GetColumnType(ColMapNewToOld[i]) as ImageType;
+                    var type = InputSchema[ColMapNewToOld[i]].Type as ImageType;
                     Contracts.Assert(type != null);
 
                     int height = type.Height;
@@ -636,16 +639,16 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
         }
     }
 
-    public sealed class ImagePixelExtractorEstimator : TrivialEstimator<ImagePixelExtractorTransform>
+    public sealed class ImagePixelExtractingEstimator : TrivialEstimator<ImagePixelExtractorTransform>
     {
-        public ImagePixelExtractorEstimator(IHostEnvironment env, string inputColumn, string outputColumn,
+        public ImagePixelExtractingEstimator(IHostEnvironment env, string inputColumn, string outputColumn,
                 ImagePixelExtractorTransform.ColorBits colors = ImagePixelExtractorTransform.ColorBits.Rgb, bool interleave = false)
-            : base(Contracts.CheckRef(env, nameof(env)).Register(nameof(ImagePixelExtractorEstimator)), new ImagePixelExtractorTransform(env, inputColumn, outputColumn, colors, interleave))
+            : base(Contracts.CheckRef(env, nameof(env)).Register(nameof(ImagePixelExtractingEstimator)), new ImagePixelExtractorTransform(env, inputColumn, outputColumn, colors, interleave))
         {
         }
 
-        public ImagePixelExtractorEstimator(IHostEnvironment env, params ImagePixelExtractorTransform.ColumnInfo[] columns)
-            : base(Contracts.CheckRef(env, nameof(env)).Register(nameof(ImagePixelExtractorEstimator)), new ImagePixelExtractorTransform(env, columns))
+        public ImagePixelExtractingEstimator(IHostEnvironment env, params ImagePixelExtractorTransform.ColumnInfo[] columns)
+            : base(Contracts.CheckRef(env, nameof(env)).Register(nameof(ImagePixelExtractingEstimator)), new ImagePixelExtractorTransform(env, columns))
         {
         }
 
@@ -669,18 +672,18 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
 
         private interface IColInput
         {
-            Scalar<Bitmap> Input { get; }
+            Custom<Bitmap> Input { get; }
 
             ImagePixelExtractorTransform.ColumnInfo MakeColumnInfo(string input, string output);
         }
 
         internal sealed class OutPipelineColumn<T> : Vector<T>, IColInput
         {
-            public Scalar<Bitmap> Input { get; }
+            public Custom<Bitmap> Input { get; }
             private static readonly ImagePixelExtractorTransform.Arguments _defaultArgs = new ImagePixelExtractorTransform.Arguments();
             private readonly ImagePixelExtractorTransform.Column _colParam;
 
-            public OutPipelineColumn(Scalar<Bitmap> input, ImagePixelExtractorTransform.Column col)
+            public OutPipelineColumn(Custom<Bitmap> input, ImagePixelExtractorTransform.Column col)
                 : base(Reconciler.Inst, input)
             {
                 Contracts.AssertValue(input);
@@ -702,11 +705,11 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
         }
 
         /// <summary>
-        /// Reconciler to an <see cref="ImagePixelExtractorEstimator"/> for the <see cref="PipelineColumn"/>.
+        /// Reconciler to an <see cref="ImagePixelExtractingEstimator"/> for the <see cref="PipelineColumn"/>.
         /// </summary>
         /// <remarks>Because we want to use the same reconciler for </remarks>
-        /// <see cref="ImageStaticPipe.ExtractPixels(Scalar{Bitmap}, bool, bool, bool, bool, bool, float, float)"/>
-        /// <see cref="ImageStaticPipe.ExtractPixelsAsBytes(Scalar{Bitmap}, bool, bool, bool, bool, bool)"/>
+        /// <see cref="ImageStaticPipe.ExtractPixels(Custom{Bitmap}, bool, bool, bool, bool, bool, float, float)"/>
+        /// <see cref="ImageStaticPipe.ExtractPixelsAsBytes(Custom{Bitmap}, bool, bool, bool, bool, bool)"/>
         private sealed class Reconciler : EstimatorReconciler
         {
             /// <summary>
@@ -728,7 +731,7 @@ namespace Microsoft.ML.Runtime.ImageAnalytics
                     var outCol = (IColInput)toOutput[i];
                     cols[i] = outCol.MakeColumnInfo(inputNames[outCol.Input], outputNames[toOutput[i]]);
                 }
-                return new ImagePixelExtractorEstimator(env, cols);
+                return new ImagePixelExtractingEstimator(env, cols);
             }
         }
     }

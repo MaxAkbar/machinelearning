@@ -2,13 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Float = System.Single;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Text.RegularExpressions;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
@@ -16,6 +10,11 @@ using Microsoft.ML.Runtime.EntryPoints;
 using Microsoft.ML.Runtime.Internal.Utilities;
 using Microsoft.ML.Runtime.Model;
 using Microsoft.ML.Runtime.Numeric;
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Text.RegularExpressions;
+using Float = System.Single;
 
 [assembly: LoadableClass(typeof(MultiOutputRegressionEvaluator), typeof(MultiOutputRegressionEvaluator), typeof(MultiOutputRegressionEvaluator.Arguments), typeof(SignatureEvaluator),
     "Multi Output Regression Evaluator", MultiOutputRegressionEvaluator.LoadName, "MultiOutputRegression", "MRE")]
@@ -246,11 +245,11 @@ namespace Microsoft.ML.Runtime.Data
                     _fnLoss = new double[size];
                 }
 
-                public void Update(Float[] score, Float[] label, int length, Float weight)
+                public void Update(ReadOnlySpan<float> score, ReadOnlySpan<float> label, int length, Float weight)
                 {
                     Contracts.Assert(length == _l1Loss.Length);
-                    Contracts.Assert(Utils.Size(score) >= length);
-                    Contracts.Assert(Utils.Size(label) >= length);
+                    Contracts.Assert(score.Length >= length);
+                    Contracts.Assert(label.Length >= length);
 
                     Double wht = weight;
                     Double l1 = 0;
@@ -323,7 +322,7 @@ namespace Microsoft.ML.Runtime.Data
                 _scoreGetter(ref _score);
                 Contracts.Check(_score.Length == _size);
 
-                if (VBufferUtils.HasNaNs(ref _score))
+                if (VBufferUtils.HasNaNs(in _score))
                 {
                     NumBadScores++;
                     return;
@@ -340,22 +339,22 @@ namespace Microsoft.ML.Runtime.Data
                     }
                 }
 
-                Float[] label;
+                ReadOnlySpan<float> label;
                 if (!_label.IsDense)
                 {
                     _label.CopyTo(_labelArr);
                     label = _labelArr;
                 }
                 else
-                    label = _label.Values;
-                Float[] score;
+                    label = _label.GetValues();
+                ReadOnlySpan<float> score;
                 if (!_score.IsDense)
                 {
                     _score.CopyTo(_scoreArr);
                     score = _scoreArr;
                 }
                 else
-                    score = _score.Values;
+                    score = _score.GetValues();
                 UnweightedCounters.Update(score, label, _size, 1);
                 if (WeightedCounters != null)
                     WeightedCounters.Update(score, label, _size, weight);
@@ -363,13 +362,10 @@ namespace Microsoft.ML.Runtime.Data
 
             public void GetSlotNames(ref VBuffer<ReadOnlyMemory<char>> slotNames)
             {
-                var values = slotNames.Values;
-                if (Utils.Size(values) < _size)
-                    values = new ReadOnlyMemory<char>[_size];
-
+                var editor = VBufferEditor.Create(ref slotNames, _size);
                 for (int i = 0; i < _size; i++)
-                    values[i] = string.Format("(Label_{0})", i).AsMemory();
-                slotNames = new VBuffer<ReadOnlyMemory<char>>(_size, values);
+                    editor.Values[i] = string.Format("(Label_{0})", i).AsMemory();
+                slotNames = editor.Commit();
             }
         }
     }
@@ -401,17 +397,17 @@ namespace Microsoft.ML.Runtime.Data
 
         private readonly ColumnType _labelType;
         private readonly ColumnType _scoreType;
-        private readonly ColumnMetadataInfo _labelMetadata;
-        private readonly ColumnMetadataInfo _scoreMetadata;
+        private readonly Schema.Metadata _labelMetadata;
+        private readonly Schema.Metadata _scoreMetadata;
 
-        public MultiOutputRegressionPerInstanceEvaluator(IHostEnvironment env, ISchema schema, string scoreCol,
+        public MultiOutputRegressionPerInstanceEvaluator(IHostEnvironment env, Schema schema, string scoreCol,
             string labelCol)
             : base(env, schema, scoreCol, labelCol)
         {
             CheckInputColumnTypes(schema, out _labelType, out _scoreType, out _labelMetadata, out _scoreMetadata);
         }
 
-        private MultiOutputRegressionPerInstanceEvaluator(IHostEnvironment env, ModelLoadContext ctx, ISchema schema)
+        private MultiOutputRegressionPerInstanceEvaluator(IHostEnvironment env, ModelLoadContext ctx, Schema schema)
             : base(env, ctx, schema)
         {
             CheckInputColumnTypes(schema, out _labelType, out _scoreType, out _labelMetadata, out _scoreMetadata);
@@ -426,7 +422,7 @@ namespace Microsoft.ML.Runtime.Data
             env.CheckValue(ctx, nameof(ctx));
             ctx.CheckAtModel(GetVersionInfo());
 
-            return new MultiOutputRegressionPerInstanceEvaluator(env, ctx, schema);
+            return new MultiOutputRegressionPerInstanceEvaluator(env, ctx, Schema.Create(schema));
         }
 
         public override void Save(ModelSaveContext ctx)
@@ -450,14 +446,14 @@ namespace Microsoft.ML.Runtime.Data
                     (col == ScoreIndex || col == LabelIndex);
         }
 
-        public override RowMapperColumnInfo[] GetOutputColumns()
+        public override Schema.DetachedColumn[] GetOutputColumns()
         {
-            var infos = new RowMapperColumnInfo[5];
-            infos[LabelOutput] = new RowMapperColumnInfo(LabelCol, _labelType, _labelMetadata);
-            infos[ScoreOutput] = new RowMapperColumnInfo(ScoreCol, _scoreType, _scoreMetadata);
-            infos[L1Output] = new RowMapperColumnInfo(L1, NumberType.R8, null);
-            infos[L2Output] = new RowMapperColumnInfo(L2, NumberType.R8, null);
-            infos[DistCol] = new RowMapperColumnInfo(Dist, NumberType.R8, null);
+            var infos = new Schema.DetachedColumn[5];
+            infos[LabelOutput] = new Schema.DetachedColumn(LabelCol, _labelType, _labelMetadata);
+            infos[ScoreOutput] = new Schema.DetachedColumn(ScoreCol, _scoreType, _scoreMetadata);
+            infos[L1Output] = new Schema.DetachedColumn(L1, NumberType.R8, null);
+            infos[L2Output] = new Schema.DetachedColumn(L2, NumberType.R8, null);
+            infos[DistCol] = new Schema.DetachedColumn(Dist, NumberType.R8, null);
             return infos;
         }
 
@@ -517,7 +513,7 @@ namespace Microsoft.ML.Runtime.Data
                     (ref double dst) =>
                     {
                         updateCacheIfNeeded();
-                        dst = VectorUtils.L1Distance(ref label, ref score);
+                        dst = VectorUtils.L1Distance(in label, in score);
                     };
                 getters[L1Output] = l1Fn;
             }
@@ -527,7 +523,7 @@ namespace Microsoft.ML.Runtime.Data
                     (ref double dst) =>
                     {
                         updateCacheIfNeeded();
-                        dst = VectorUtils.L2DistSquared(ref label, ref score);
+                        dst = VectorUtils.L2DistSquared(in label, in score);
                     };
                 getters[L2Output] = l2Fn;
             }
@@ -537,15 +533,15 @@ namespace Microsoft.ML.Runtime.Data
                     (ref double dst) =>
                     {
                         updateCacheIfNeeded();
-                        dst = MathUtils.Sqrt(VectorUtils.L2DistSquared(ref label, ref score));
+                        dst = MathUtils.Sqrt(VectorUtils.L2DistSquared(in label, in score));
                     };
                 getters[DistCol] = distFn;
             }
             return getters;
         }
 
-        private void CheckInputColumnTypes(ISchema schema, out ColumnType labelType, out ColumnType scoreType,
-            out ColumnMetadataInfo labelMetadata, out ColumnMetadataInfo scoreMetadata)
+        private void CheckInputColumnTypes(Schema schema, out ColumnType labelType, out ColumnType scoreType,
+            out Schema.Metadata labelMetadata, out Schema.Metadata scoreMetadata)
         {
             Host.AssertNonEmpty(ScoreCol);
             Host.AssertNonEmpty(LabelCol);
@@ -555,59 +551,60 @@ namespace Microsoft.ML.Runtime.Data
                 throw Host.Except("Label column '{0}' has type '{1}' but must be a known-size vector of R4 or R8", LabelCol, t);
             labelType = new VectorType(t.ItemType.AsPrimitive, t.VectorSize);
             var slotNamesType = new VectorType(TextType.Instance, t.VectorSize);
-            labelMetadata = new ColumnMetadataInfo(LabelCol);
-            labelMetadata.Add(MetadataUtils.Kinds.SlotNames, new MetadataInfo<VBuffer<ReadOnlyMemory<char>>>(slotNamesType,
-                CreateSlotNamesGetter(schema, LabelIndex, labelType.VectorSize, "True")));
+            var builder = new MetadataBuilder();
+            builder.AddSlotNames(t.VectorSize, CreateSlotNamesGetter(schema, LabelIndex, labelType.VectorSize, "True"));
+            labelMetadata = builder.GetMetadata();
 
             t = schema.GetColumnType(ScoreIndex);
             if (t.VectorSize == 0 || t.ItemType != NumberType.Float)
                 throw Host.Except("Score column '{0}' has type '{1}' but must be a known length vector of type R4", ScoreCol, t);
             scoreType = new VectorType(t.ItemType.AsPrimitive, t.VectorSize);
-            scoreMetadata = new ColumnMetadataInfo(ScoreCol);
-            scoreMetadata.Add(MetadataUtils.Kinds.SlotNames, new MetadataInfo<VBuffer<ReadOnlyMemory<char>>>(slotNamesType,
-                CreateSlotNamesGetter(schema, ScoreIndex, scoreType.VectorSize, "Predicted")));
-            scoreMetadata.Add(MetadataUtils.Kinds.ScoreColumnKind, new MetadataInfo<ReadOnlyMemory<char>>(TextType.Instance, GetScoreColumnKind));
-            scoreMetadata.Add(MetadataUtils.Kinds.ScoreValueKind, new MetadataInfo<ReadOnlyMemory<char>>(TextType.Instance, GetScoreValueKind));
-            scoreMetadata.Add(MetadataUtils.Kinds.ScoreColumnSetId,
-                new MetadataInfo<uint>(MetadataUtils.ScoreColumnSetIdType, GetScoreColumnSetId(schema)));
+            builder = new MetadataBuilder();
+            builder.AddSlotNames(t.VectorSize, CreateSlotNamesGetter(schema, ScoreIndex, scoreType.VectorSize, "Predicted"));
+
+            ValueGetter<ReadOnlyMemory<char>> getter = GetScoreColumnKind;
+            builder.Add(MetadataUtils.Kinds.ScoreColumnKind, TextType.Instance, getter);
+            getter = GetScoreValueKind;
+            builder.Add(MetadataUtils.Kinds.ScoreValueKind, TextType.Instance, getter);
+            ValueGetter<uint> uintGetter = GetScoreColumnSetId(schema);
+            builder.Add(MetadataUtils.Kinds.ScoreColumnSetId, MetadataUtils.ScoreColumnSetIdType, uintGetter);
+            scoreMetadata = builder.GetMetadata();
         }
 
-        private MetadataUtils.MetadataGetter<uint> GetScoreColumnSetId(ISchema schema)
+        private ValueGetter<uint> GetScoreColumnSetId(Schema schema)
         {
             int c;
             var max = schema.GetMaxMetadataKind(out c, MetadataUtils.Kinds.ScoreColumnSetId);
             uint id = checked(max + 1);
             return
-                (int col, ref uint dst) => dst = id;
+                (ref uint dst) => dst = id;
         }
 
-        private void GetScoreColumnKind(int col, ref ReadOnlyMemory<char> dst)
+        private void GetScoreColumnKind(ref ReadOnlyMemory<char> dst)
         {
             dst = MetadataUtils.Const.ScoreColumnKind.MultiOutputRegression.AsMemory();
         }
 
-        private void GetScoreValueKind(int col, ref ReadOnlyMemory<char> dst)
+        private void GetScoreValueKind(ref ReadOnlyMemory<char> dst)
         {
             dst = MetadataUtils.Const.ScoreValueKind.Score.AsMemory();
         }
 
-        private MetadataUtils.MetadataGetter<VBuffer<ReadOnlyMemory<char>>> CreateSlotNamesGetter(ISchema schema, int column, int length, string prefix)
+        private ValueGetter<VBuffer<ReadOnlyMemory<char>>> CreateSlotNamesGetter(ISchema schema, int column, int length, string prefix)
         {
             var type = schema.GetMetadataTypeOrNull(MetadataUtils.Kinds.SlotNames, column);
             if (type != null && type.IsText)
             {
                 return
-                    (int col, ref VBuffer<ReadOnlyMemory<char>> dst) => schema.GetMetadata(MetadataUtils.Kinds.SlotNames, column, ref dst);
+                    (ref VBuffer<ReadOnlyMemory<char>> dst) => schema.GetMetadata(MetadataUtils.Kinds.SlotNames, column, ref dst);
             }
             return
-                (int col, ref VBuffer<ReadOnlyMemory<char>> dst) =>
+                (ref VBuffer<ReadOnlyMemory<char>> dst) =>
                 {
-                    var values = dst.Values;
-                    if (Utils.Size(values) < length)
-                        values = new ReadOnlyMemory<char>[length];
+                    var editor = VBufferEditor.Create(ref dst, length);
                     for (int i = 0; i < length; i++)
-                        values[i] = string.Format("{0}_{1}", prefix, i).AsMemory();
-                    dst = new VBuffer<ReadOnlyMemory<char>>(length, values);
+                        editor.Values[i] = string.Format("{0}_{1}", prefix, i).AsMemory();
+                    dst = editor.Commit();
                 };
         }
     }

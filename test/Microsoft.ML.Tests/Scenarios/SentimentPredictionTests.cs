@@ -9,12 +9,14 @@ using Microsoft.ML.Legacy.Transforms;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Api;
 using Microsoft.ML.Runtime.Data;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
 
 namespace Microsoft.ML.Scenarios
 {
+#pragma warning disable 612, 618
     public partial class ScenariosTests
     {
         public const string SentimentDataPath = "wikipedia-detox-250-line-data.tsv";
@@ -44,7 +46,7 @@ namespace Microsoft.ML.Scenarios
             ValidateBinaryMetricsSymSGD(metrics);
         }
 
-        [Fact]
+        [ConditionalFact(typeof(Environment), nameof(Environment.Is64BitProcess))] // LightGBM is 64-bit only
         public void TrainAndPredictLightGBMSentimentModelTest()
         {
             var pipeline = PreparePipelineLightGBM();
@@ -187,7 +189,7 @@ namespace Microsoft.ML.Scenarios
             Assert.True(predictions.ElementAt(1).Sentiment);
         }
 
-        private void ValidateBinaryMetricsSymSGD(BinaryClassificationMetrics metrics)
+        private void ValidateBinaryMetricsSymSGD(Microsoft.ML.Legacy.Models.BinaryClassificationMetrics metrics)
         {
 
             Assert.Equal(.8889, metrics.Accuracy, 4);
@@ -220,7 +222,7 @@ namespace Microsoft.ML.Scenarios
 
         }
 
-        private void ValidateBinaryMetricsLightGBM(BinaryClassificationMetrics metrics)
+        private void ValidateBinaryMetricsLightGBM(Microsoft.ML.Legacy.Models.BinaryClassificationMetrics metrics)
         {
 
             Assert.Equal(0.61111111111111116, metrics.Accuracy, 4);
@@ -253,7 +255,7 @@ namespace Microsoft.ML.Scenarios
 
         }
 
-        private void ValidateBinaryMetrics(BinaryClassificationMetrics metrics)
+        private void ValidateBinaryMetrics(Microsoft.ML.Legacy.Models.BinaryClassificationMetrics metrics)
         {
 
             Assert.Equal(0.6111, metrics.Accuracy, 4);
@@ -317,12 +319,10 @@ namespace Microsoft.ML.Scenarios
 
             pipeline.Add(new TextFeaturizer("Features", "SentimentText")
             {
-                KeepDiacritics = false,
                 KeepPunctuations = false,
-                TextCase = TextNormalizerTransformCaseNormalizationMode.Lower,
                 OutputTokens = true,
-                StopWordsRemover = new PredefinedStopWordsRemover(),
-                VectorNormalizer = TextTransformTextNormKind.L2,
+                UsePredefinedStopWordRemover = true,
+                VectorNormalizer = TextFeaturizingEstimatorTextNormKind.L2,
                 CharFeatureExtractor = new NGramNgramExtractor() { NgramLength = 3, AllLengths = false },
                 WordFeatureExtractor = new NGramNgramExtractor() { NgramLength = 2, AllLengths = true }
             });
@@ -366,12 +366,10 @@ namespace Microsoft.ML.Scenarios
 
             pipeline.Add(new TextFeaturizer("Features", "SentimentText")
             {
-                KeepDiacritics = false,
                 KeepPunctuations = false,
-                TextCase = TextNormalizerTransformCaseNormalizationMode.Lower,
                 OutputTokens = true,
-                StopWordsRemover = new PredefinedStopWordsRemover(),
-                VectorNormalizer = TextTransformTextNormKind.L2,
+                UsePredefinedStopWordRemover = true,
+                VectorNormalizer = TextFeaturizingEstimatorTextNormKind.L2,
                 CharFeatureExtractor = new NGramNgramExtractor() { NgramLength = 3, AllLengths = false },
                 WordFeatureExtractor = new NGramNgramExtractor() { NgramLength = 2, AllLengths = true }
             });
@@ -415,18 +413,15 @@ namespace Microsoft.ML.Scenarios
 
             pipeline.Add(new TextFeaturizer("Features", "SentimentText")
             {
-                KeepDiacritics = false,
                 KeepPunctuations = false,
-                TextCase = TextNormalizerTransformCaseNormalizationMode.Lower,
                 OutputTokens = true,
-                StopWordsRemover = new PredefinedStopWordsRemover(),
-                VectorNormalizer = TextTransformTextNormKind.L2,
+                UsePredefinedStopWordRemover = true,
+                VectorNormalizer = TextFeaturizingEstimatorTextNormKind.L2,
                 CharFeatureExtractor = new NGramNgramExtractor() { NgramLength = 3, AllLengths = false },
                 WordFeatureExtractor = new NGramNgramExtractor() { NgramLength = 2, AllLengths = true }
             });
 
-
-            pipeline.Add(new SymSgdBinaryClassifier() { NumberOfThreads = 1});
+            pipeline.Add(new SymSgdBinaryClassifier() { NumberOfThreads = 1 });
 
             pipeline.Add(new PredictedLabelColumnOriginalValueConverter() { PredictedLabelColumn = "PredictedLabel" });
             return pipeline;
@@ -522,5 +517,6 @@ namespace Microsoft.ML.Scenarios
             public bool Sentiment;
         }
     }
+#pragma warning restore 612, 618
 }
 

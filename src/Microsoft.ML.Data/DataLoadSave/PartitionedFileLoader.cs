@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
@@ -273,7 +274,7 @@ namespace Microsoft.ML.Runtime.Data
             var saver = new BinarySaver(_host, saverArgs);
             using (var strm = new MemoryStream())
             {
-                var allColumns = Enumerable.Range(0, Schema.ColumnCount).ToArray();
+                var allColumns = Enumerable.Range(0, Schema.Count).ToArray();
                 saver.SaveData(strm, noRows, allColumns);
                 ctx.SaveBinaryStream(SchemaCtxName, w => w.WriteByteArray(strm.ToArray()));
             }
@@ -285,19 +286,19 @@ namespace Microsoft.ML.Runtime.Data
 
         public bool CanShuffle => true;
 
-        public ISchema Schema { get; }
+        public Schema Schema { get; }
 
-        public long? GetRowCount(bool lazy = true)
+        public long? GetRowCount()
         {
             return null;
         }
 
-        public IRowCursor GetRowCursor(Func<int, bool> needCol, IRandom rand = null)
+        public IRowCursor GetRowCursor(Func<int, bool> needCol, Random rand = null)
         {
             return new Cursor(_host, this, _files, needCol, rand);
         }
 
-        public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> needCol, int n, IRandom rand = null)
+        public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> needCol, int n, Random rand = null)
         {
             consolidator = null;
             var cursor = new Cursor(_host, this, _files, needCol, rand);
@@ -311,17 +312,18 @@ namespace Microsoft.ML.Runtime.Data
         /// <param name="cols">The partitioned columns.</param>
         /// <param name="subLoader">The sub loader.</param>
         /// <returns>The resulting schema.</returns>
-        private ISchema CreateSchema(IExceptionContext ectx, Column[] cols, IDataLoader subLoader)
+        private Schema CreateSchema(IExceptionContext ectx, Column[] cols, IDataLoader subLoader)
         {
             Contracts.AssertValue(cols);
             Contracts.AssertValue(subLoader);
 
-            var columnNameTypes = cols.Select((col) => new KeyValuePair<string, ColumnType>(col.Name, PrimitiveType.FromKind(col.Type.Value)));
-            var colSchema = new SimpleSchema(ectx, columnNameTypes.ToArray());
+            var builder = new SchemaBuilder();
+            builder.AddColumns(cols.Select(c => new Schema.DetachedColumn(c.Name, PrimitiveType.FromKind(c.Type.Value), null)));
+            var colSchema = builder.GetSchema();
 
             var subSchema = subLoader.Schema;
 
-            if (subSchema.ColumnCount == 0)
+            if (subSchema.Count == 0)
             {
                 return colSchema;
             }
@@ -333,11 +335,11 @@ namespace Microsoft.ML.Runtime.Data
                     colSchema
                 };
 
-                return new CompositeSchema(schemas);
+                return Schema.Create(new CompositeSchema(schemas));
             }
         }
 
-        private byte [] SaveLoaderToBytes(IDataLoader loader)
+        private byte[] SaveLoaderToBytes(IDataLoader loader)
         {
             Contracts.CheckValue(loader, nameof(loader));
 
@@ -348,7 +350,7 @@ namespace Microsoft.ML.Runtime.Data
             }
         }
 
-        private IDataLoader CreateLoaderFromBytes(byte [] loaderBytes, IMultiStreamSource files)
+        private IDataLoader CreateLoaderFromBytes(byte[] loaderBytes, IMultiStreamSource files)
         {
             Contracts.CheckValue(loaderBytes, nameof(loaderBytes));
             Contracts.CheckValue(files, nameof(files));
@@ -374,7 +376,7 @@ namespace Microsoft.ML.Runtime.Data
 
             private IEnumerator<int> _fileOrder;
 
-            public Cursor(IChannelProvider provider, PartitionedFileLoader parent, IMultiStreamSource files, Func<int, bool> predicate, IRandom rand)
+            public Cursor(IChannelProvider provider, PartitionedFileLoader parent, IMultiStreamSource files, Func<int, bool> predicate, Random rand)
                 : base(provider)
             {
                 Contracts.AssertValue(parent);
@@ -383,9 +385,9 @@ namespace Microsoft.ML.Runtime.Data
 
                 _parent = parent;
 
-                _active = Utils.BuildArray(Schema.ColumnCount, predicate);
+                _active = Utils.BuildArray(Schema.Count, predicate);
                 _subActive = _active.Take(SubColumnCount).ToArray();
-                _colValues = new ReadOnlyMemory<char>[Schema.ColumnCount - SubColumnCount];
+                _colValues = new ReadOnlyMemory<char>[Schema.Count - SubColumnCount];
 
                 _subGetters = new Delegate[SubColumnCount];
                 _getters = CreateGetters();
@@ -395,7 +397,7 @@ namespace Microsoft.ML.Runtime.Data
 
             public override long Batch => 0;
 
-            public ISchema Schema => _parent.Schema;
+            public Schema Schema => _parent.Schema;
 
             public ValueGetter<TValue> GetGetter<TValue>(int col)
             {
@@ -423,7 +425,7 @@ namespace Microsoft.ML.Runtime.Data
 
             public bool IsColumnActive(int col)
             {
-                Ch.Check(0 <= col && col < Schema.ColumnCount);
+                Ch.Check(0 <= col && col < Schema.Count);
                 return _active[col];
             }
 
@@ -551,7 +553,7 @@ namespace Microsoft.ML.Runtime.Data
 
             private Delegate[] CreateGetters()
             {
-                Delegate[] getters = new Delegate[Schema.ColumnCount];
+                Delegate[] getters = new Delegate[Schema.Count];
                 for (int i = 0; i < getters.Length; i++)
                 {
                     if (!_active[i])
@@ -611,7 +613,7 @@ namespace Microsoft.ML.Runtime.Data
 
                 return (ref TValue value) =>
                 {
-                    conv(ref _colValues[col], ref value);
+                    conv(in _colValues[col], ref value);
                 };
             }
 
@@ -620,9 +622,9 @@ namespace Microsoft.ML.Runtime.Data
                 return col < SubColumnCount;
             }
 
-            private int SubColumnCount => Schema.ColumnCount - _parent._srcDirIndex.Length;
+            private int SubColumnCount => Schema.Count - _parent._srcDirIndex.Length;
 
-            private IEnumerable<int> CreateFileOrder(IRandom rand)
+            private IEnumerable<int> CreateFileOrder(Random rand)
             {
                 if (rand == null)
                 {

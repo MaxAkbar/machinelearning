@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime.Internal.Utilities;
 
 namespace Microsoft.ML.Runtime.Data
@@ -24,7 +25,7 @@ namespace Microsoft.ML.Runtime.Data
     /// they were directly instantiated from a row.
     ///
     /// Generally actual implementors of this interface should not implement this directly, but instead implement
-    /// <see cref="IColumn{T}"/>.
+    /// <see cref="IValueColumn{T}"/>.
     /// </summary>
     // REVIEW: It is possible we may want to make this ICounted, but let's not start with
     // that assumption. The use cases I have in mind are that we'll still, on the side, have an
@@ -55,7 +56,7 @@ namespace Microsoft.ML.Runtime.Data
 
         /// <summary>
         /// The value getter, as a <see cref="Delegate"/>. Implementators should just pass through
-        /// <see cref="IColumn{T}.GetGetter"/>.
+        /// <see cref="IValueColumn{T}.GetGetter"/>.
         /// </summary>
         /// <returns>The generic getter delegate</returns>
         Delegate GetGetter();
@@ -66,7 +67,7 @@ namespace Microsoft.ML.Runtime.Data
     /// </summary>
     /// <typeparam name="T">The type of values in this column. This should agree with the <see cref="ColumnType.RawType"/>
     /// field of <see name="IRowColumn.Type"/>.</typeparam>
-    public interface IColumn<T> : IColumn
+    public interface IValueColumn<T> : IColumn
     {
         new ValueGetter<T> GetGetter();
     }
@@ -119,18 +120,6 @@ namespace Microsoft.ML.Runtime.Data
             Contracts.Assert(schema.GetColumnType(col).RawType == typeof(T));
 
             return new SchemaWrap<T>(schema, col);
-        }
-
-        /// <summary>
-        /// Wraps the metadata of a column as a row.
-        /// </summary>
-        public static IRow GetMetadataAsRow(ISchema schema, int col, Func<string, bool> takeMetadata)
-        {
-            Contracts.CheckValue(schema, nameof(schema));
-            Contracts.CheckParam(0 <= col && col < schema.ColumnCount, nameof(col));
-            Contracts.CheckValue(takeMetadata, nameof(takeMetadata));
-
-            return new MetadataRow(schema, col, takeMetadata);
         }
 
         /// <summary>
@@ -230,12 +219,12 @@ namespace Microsoft.ML.Runtime.Data
 
         private static IColumn CloneColumnCore<T>(IColumn column)
         {
-            Contracts.Assert(column is IColumn<T>);
+            Contracts.Assert(column is IValueColumn<T>);
             IRow meta = column.Metadata;
             if (meta != null)
                 meta = RowCursorUtils.CloneRow(meta);
 
-            var tcolumn = (IColumn<T>)column;
+            var tcolumn = (IValueColumn<T>)column;
             if (!tcolumn.IsActive)
                 return new InactiveImpl<T>(tcolumn.Name, meta, tcolumn.Type);
             T val = default(T);
@@ -246,7 +235,7 @@ namespace Microsoft.ML.Runtime.Data
         /// <summary>
         /// The implementation for a simple wrapping of an <see cref="IRow"/>.
         /// </summary>
-        private sealed class RowWrap<T> : IColumn<T>
+        private sealed class RowWrap<T> : IValueColumn<T>
         {
             private readonly IRow _row;
             private readonly int _col;
@@ -286,7 +275,7 @@ namespace Microsoft.ML.Runtime.Data
         /// <summary>
         /// The base class for a few <see cref="ICounted"/> implementations that do not "go" anywhere.
         /// </summary>
-        public abstract class DefaultCounted : ICounted
+        private abstract class DefaultCounted : ICounted
         {
             public long Position => 0;
             public long Batch => 0;
@@ -301,7 +290,7 @@ namespace Microsoft.ML.Runtime.Data
         /// Simple wrapper for a schema column, considered inctive with no getter.
         /// </summary>
         /// <typeparam name="T">The type of the getter</typeparam>
-        private sealed class SchemaWrap<T> : IColumn<T>
+        private sealed class SchemaWrap<T> : IValueColumn<T>
         {
             private readonly ISchema _schema;
             private readonly int _col;
@@ -343,20 +332,29 @@ namespace Microsoft.ML.Runtime.Data
         /// column as an <see cref="IRow"/>. This class will cease to be necessary at the point when all
         /// metadata implementations are just simple <see cref="IRow"/>s.
         /// </summary>
-        public sealed class MetadataRow : DefaultCounted, IRow
+        public sealed class MetadataRow : IRow
         {
-            public ISchema Schema => _schema;
+            public Schema Schema => _schemaImpl.AsSchema;
 
             private readonly ISchema _metaSchema;
             private readonly int _col;
-            private readonly SchemaImpl _schema;
+            private readonly SchemaImpl _schemaImpl;
 
             private readonly KeyValuePair<string, ColumnType>[] _map;
+
+            long ICounted.Position => 0;
+            long ICounted.Batch => 0;
+            ValueGetter<UInt128> ICounted.GetIdGetter()
+                => IdGetter;
+
+            private static void IdGetter(ref UInt128 id)
+                => id = default;
 
             private sealed class SchemaImpl : ISchema
             {
                 private readonly MetadataRow _parent;
                 private readonly Dictionary<string, int> _nameToCol;
+                public Schema AsSchema { get; }
 
                 public int ColumnCount { get { return _parent._map.Length; } }
 
@@ -367,6 +365,8 @@ namespace Microsoft.ML.Runtime.Data
                     _nameToCol = new Dictionary<string, int>(ColumnCount);
                     for (int i = 0; i < _parent._map.Length; ++i)
                         _nameToCol[_parent._map[i].Key] = i;
+
+                    AsSchema = Schema.Create(this);
                 }
 
                 public string GetColumnName(int col)
@@ -412,7 +412,7 @@ namespace Microsoft.ML.Runtime.Data
                 _metaSchema = schema;
                 _col = col;
                 _map = _metaSchema.GetMetadataTypes(_col).Where(x => takeMetadata(x.Key)).ToArray();
-                _schema = new SchemaImpl(this);
+                _schemaImpl = new SchemaImpl(this);
             }
 
             public bool IsColumnActive(int col)
@@ -434,7 +434,7 @@ namespace Microsoft.ML.Runtime.Data
         /// This is used for a few <see cref="IColumn"/> implementations that need to store their own name,
         /// metadata, and type themselves.
         /// </summary>
-        private abstract class SimpleColumnBase<T> : IColumn<T>
+        private abstract class SimpleColumnBase<T> : IValueColumn<T>
         {
             public string Name { get; }
             public IRow Metadata { get; }
@@ -553,7 +553,7 @@ namespace Microsoft.ML.Runtime.Data
             private readonly IColumn[] _columns;
             private readonly SchemaImpl _schema;
 
-            public ISchema Schema => _schema;
+            public Schema Schema => _schema.AsSchema;
             public long Position => _counted.Position;
             public long Batch => _counted.Batch;
 
@@ -569,7 +569,7 @@ namespace Microsoft.ML.Runtime.Data
             public ValueGetter<TValue> GetGetter<TValue>(int col)
             {
                 Contracts.CheckParam(IsColumnActive(col), nameof(col), "requested column not active");
-                var rowCol = _columns[col] as IColumn<TValue>;
+                var rowCol = _columns[col] as IValueColumn<TValue>;
                 if (rowCol == null)
                     throw Contracts.Except("Invalid TValue: '{0}'", typeof(TValue));
                 return rowCol.GetGetter();
@@ -591,6 +591,8 @@ namespace Microsoft.ML.Runtime.Data
                 private readonly RowColumnRow _parent;
                 private readonly Dictionary<string, int> _nameToIndex;
 
+                public Schema AsSchema { get; }
+
                 public int ColumnCount => _parent._columns.Length;
 
                 public SchemaImpl(RowColumnRow parent)
@@ -600,6 +602,7 @@ namespace Microsoft.ML.Runtime.Data
                     _nameToIndex = new Dictionary<string, int>();
                     for (int i = 0; i < _parent._columns.Length; ++i)
                         _nameToIndex[_parent._columns[i].Name] = i;
+                    AsSchema = Schema.Create(this);
                 }
 
                 public void GetMetadata<TValue>(string kind, int col, ref TValue value)

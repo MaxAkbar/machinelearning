@@ -3,14 +3,14 @@
 // See the LICENSE file in the project root for more information.
 
 using Float = System.Single;
-
-using System;
-using System.Collections.Generic;
-using Microsoft.ML.Runtime;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.EntryPoints;
 using Microsoft.ML.Runtime.Model;
+using Microsoft.ML.Runtime;
+using System.Collections.Generic;
+using System;
 
 [assembly: LoadableClass(typeof(RegressionEvaluator), typeof(RegressionEvaluator), typeof(RegressionEvaluator.Arguments), typeof(SignatureEvaluator),
     "Regression Evaluator", RegressionEvaluator.LoadName, "Regression")]
@@ -107,7 +107,7 @@ namespace Microsoft.ML.Runtime.Data
                     }
                 }
 
-                protected override void UpdateCore(Float label, ref float score, ref double loss, Float weight)
+                protected override void UpdateCore(Float label, in float score, in double loss, Float weight)
                 {
                     Double currL1Loss = Math.Abs((Double)label - score);
                     TotalL1Loss += currL1Loss * weight;
@@ -115,7 +115,7 @@ namespace Microsoft.ML.Runtime.Data
                     TotalLoss += loss * weight; // REVIEW: Fix this! += (Double)loss * wht; //Loss as reported by regressor, note it can result in NaN if loss is NaN
                 }
 
-                protected override void Normalize(ref double src, ref double dst)
+                protected override void Normalize(in double src, ref double dst)
                 {
                     dst = src / SumWeights;
                 }
@@ -140,12 +140,12 @@ namespace Microsoft.ML.Runtime.Data
                 _weightedCounters = Weighted ? new Counters() : null;
             }
 
-            protected override void ApplyLossFunction(ref float score, float label, ref double loss)
+            protected override void ApplyLossFunction(in float score, float label, ref double loss)
             {
                 loss = LossFunction.Loss(score, label);
             }
 
-            protected override bool IsNaN(ref Float score)
+            protected override bool IsNaN(in Float score)
             {
                 return Float.IsNaN(score);
             }
@@ -157,72 +157,6 @@ namespace Microsoft.ML.Runtime.Data
             }
         }
 
-        public sealed class Result
-        {
-            /// <summary>
-            /// Gets the absolute loss of the model.
-            /// </summary>
-            /// <remarks>
-            /// The absolute loss is defined as
-            /// L1 = (1/m) * sum( abs( yi - y&apos;i))
-            /// where m is the number of instances in the test set.
-            /// y'i are the predicted labels for each instance.
-            /// yi are the correct labels of each instance.
-            /// </remarks>
-            public double L1 { get; }
-
-            /// <summary>
-            /// Gets the squared loss of the model.
-            /// </summary>
-            /// <remarks>
-            /// The squared loss is defined as
-            /// L2 = (1/m) * sum(( yi - y&apos;i)^2)
-            /// where m is the number of instances in the test set.
-            /// y'i are the predicted labels for each instance.
-            /// yi are the correct labels of each instance.
-            /// </remarks>
-            public double L2 { get; }
-
-            /// <summary>
-            /// Gets the root mean square loss (or RMS) which is the square root of the L2 loss.
-            /// </summary>
-            public double Rms { get; }
-
-            /// <summary>
-            /// Gets the user defined loss function.
-            /// </summary>
-            /// <remarks>
-            /// This is the average of a loss function defined by the user,
-            /// computed over all the instances in the test set.
-            /// </remarks>
-            public double LossFn { get; }
-
-            /// <summary>
-            /// Gets the R squared value of the model, which is also known as
-            /// the coefficient of determination​.
-            /// </summary>
-            public double RSquared { get; }
-
-            private static T Fetch<T>(IExceptionContext ectx, IRow row, string name)
-            {
-                if (!row.Schema.TryGetColumnIndex(name, out int col))
-                    throw ectx.Except($"Could not find column '{name}'");
-                T val = default;
-                row.GetGetter<T>(col)(ref val);
-                return val;
-            }
-
-            internal Result(IExceptionContext ectx, IRow overallResult)
-            {
-                double Fetch(string name) => Fetch<double>(ectx, overallResult, name);
-                L1 = Fetch(RegressionEvaluator.L1);
-                L2 = Fetch(RegressionEvaluator.L2);
-                Rms = Fetch(RegressionEvaluator.Rms);
-                LossFn = Fetch(RegressionEvaluator.Loss);
-                RSquared = Fetch(RegressionEvaluator.RSquared);
-            }
-        }
-
         /// <summary>
         /// Evaluates scored regression data.
         /// </summary>
@@ -230,10 +164,7 @@ namespace Microsoft.ML.Runtime.Data
         /// <param name="label">The name of the label column.</param>
         /// <param name="score">The name of the predicted score column.</param>
         /// <returns>The evaluation metrics for these outputs.</returns>
-        public Result Evaluate(
-            IDataView data,
-            string label,
-            string score)
+        public RegressionMetrics Evaluate(IDataView data, string label, string score)
         {
             Host.CheckValue(data, nameof(data));
             Host.CheckNonEmpty(label, nameof(label));
@@ -246,12 +177,12 @@ namespace Microsoft.ML.Runtime.Data
             Host.Assert(resultDict.ContainsKey(MetricKinds.OverallMetrics));
             var overall = resultDict[MetricKinds.OverallMetrics];
 
-            Result result;
+            RegressionMetrics result;
             using (var cursor = overall.GetRowCursor(i => true))
             {
                 var moved = cursor.MoveNext();
                 Host.Assert(moved);
-                result = new Result(Host, cursor);
+                result = new RegressionMetrics(Host, cursor);
                 moved = cursor.MoveNext();
                 Host.Assert(!moved);
             }
@@ -320,11 +251,11 @@ namespace Microsoft.ML.Runtime.Data
                 col => (activeOutput(L1Col) || activeOutput(L2Col)) && (col == ScoreIndex || col == LabelIndex);
         }
 
-        public override RowMapperColumnInfo[] GetOutputColumns()
+        public override Schema.DetachedColumn[] GetOutputColumns()
         {
-            var infos = new RowMapperColumnInfo[2];
-            infos[L1Col] = new RowMapperColumnInfo(L1, NumberType.R8, null);
-            infos[L2Col] = new RowMapperColumnInfo(L2, NumberType.R8, null);
+            var infos = new Schema.DetachedColumn[2];
+            infos[L1Col] = new Schema.DetachedColumn(L1, NumberType.R8, null);
+            infos[L2Col] = new Schema.DetachedColumn(L2, NumberType.R8, null);
             return infos;
         }
 

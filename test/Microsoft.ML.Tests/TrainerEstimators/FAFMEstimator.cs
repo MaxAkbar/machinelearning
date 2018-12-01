@@ -18,17 +18,19 @@ namespace Microsoft.ML.Tests.TrainerEstimators
         public void FieldAwareFactorizationMachine_Estimator()
         {
             var data = new TextLoader(Env, GetFafmBCLoaderArgs())
-                    .Read(new MultiFileSource(GetDataPath(TestDatasets.breastCancer.trainFilename)));
+                    .Read(GetDataPath(TestDatasets.breastCancer.trainFilename));
 
-            var est = new FieldAwareFactorizationMachineTrainer(Env, "Label", new[] { "Feature1", "Feature2", "Feature3", "Feature4" }, 
-                advancedSettings:s=>
-                {
-                    s.Shuffle = false;
-                    s.Iters = 3;
-                    s.LatentDim = 7;
-                });
+            var est = new FieldAwareFactorizationMachineTrainer(Env, new[] { "Feature1", "Feature2", "Feature3", "Feature4" }, "Label",
+                advancedSettings: s =>
+                 {
+                     s.Shuffle = false;
+                     s.Iters = 3;
+                     s.LatentDim = 7;
+                 });
 
             TestEstimatorCore(est, data);
+            var model = est.Fit(data);
+            var anotherModel = est.Train(data, data, model.Model);
 
             Done();
         }

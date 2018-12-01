@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime.Data.Conversion;
 using Microsoft.ML.Runtime.Internal.Utilities;
 
@@ -99,7 +100,7 @@ namespace Microsoft.ML.Runtime.Data
                 (ref TDst dst) =>
                 {
                     getter(ref src);
-                    conv(ref src, ref dst);
+                    conv(in src, ref dst);
                 };
         }
 
@@ -134,7 +135,7 @@ namespace Microsoft.ML.Runtime.Data
                 (ref StringBuilder dst) =>
                 {
                     getter(ref src);
-                    conv(ref src, ref dst);
+                    conv(in src, ref dst);
                 };
         }
 
@@ -267,27 +268,23 @@ namespace Microsoft.ML.Runtime.Data
                 if (size > 0)
                     Contracts.Check(src.Length == size);
 
-                var values = dst.Values;
-                var indices = dst.Indices;
-                int count = src.Count;
+                var srcValues = src.GetValues();
+                int count = srcValues.Length;
+                var editor = VBufferEditor.Create(ref dst, src.Length, count);
                 if (count > 0)
                 {
-                    if (Utils.Size(values) < count)
-                        values = new TDst[count];
-
                     // REVIEW: This would be faster if there were loops for each std conversion.
                     // Consider adding those to the Conversions class.
                     for (int i = 0; i < count; i++)
-                        conv(ref src.Values[i], ref values[i]);
+                        conv(in srcValues[i], ref editor.Values[i]);
 
                     if (!src.IsDense)
                     {
-                        if (Utils.Size(indices) < count)
-                            indices = new int[count];
-                        Array.Copy(src.Indices, indices, count);
+                        var srcIndices = src.GetIndices();
+                        srcIndices.CopyTo(editor.Indices);
                     }
                 }
-                dst = new VBuffer<TDst>(src.Length, count, values, indices);
+                dst = editor.Commit();
             };
         }
 
@@ -445,16 +442,15 @@ namespace Microsoft.ML.Runtime.Data
                     getSrc(ref src);
                     // Unfortunately defaults in one to not translate to defaults of the other,
                     // so this will not be sparsity preserving. Assume a dense output.
-                    Single[] vals = dst.Values;
-                    Utils.EnsureSize(ref vals, src.Length);
+                    var editor = VBufferEditor.Create(ref dst, src.Length);
                     foreach (var kv in src.Items(all: true))
                     {
                         if (0 < kv.Value && kv.Value <= keyMax)
-                            vals[kv.Key] = kv.Value - 1;
+                            editor.Values[kv.Key] = kv.Value - 1;
                         else
-                            vals[kv.Key] = Single.NaN;
+                            editor.Values[kv.Key] = Single.NaN;
                     }
-                    dst = new VBuffer<Single>(src.Length, vals, dst.Indices);
+                    dst = editor.Commit();
                 };
         }
 
@@ -473,8 +469,21 @@ namespace Microsoft.ML.Runtime.Data
         }
 
         /// <summary>
+        /// Fetches the value of the column by name, in the given row.
+        /// Used by the evaluators to retrieve the metrics from the results IDataView.
+        /// </summary>
+        public static T Fetch<T>(IExceptionContext ectx, IRow row, string name)
+        {
+            if (!row.Schema.TryGetColumnIndex(name, out int col))
+                throw ectx.Except($"Could not find column '{name}'");
+            T val = default;
+            row.GetGetter<T>(col)(ref val);
+            return val;
+        }
+
+        /// <summary>
         /// Given a row, returns a one-row data view. This is useful for cases where you have a row, and you
-        /// wish to use some facility normally only exposed to dataviews. (E.g., you have an <see cref="IRow"/>
+        /// wish to use some facility normally only exposed to dataviews. (For example, you have an <see cref="IRow"/>
         /// but want to save it somewhere using a <see cref="Microsoft.ML.Runtime.Data.IO.BinarySaver"/>.)
         /// Note that it is not possible for this method to ensure that the input <paramref name="row"/> does not
         /// change, so users of this convenience must take care of what they do with the input row or the data
@@ -497,7 +506,7 @@ namespace Microsoft.ML.Runtime.Data
             private readonly IRow _row;
             private readonly IHost _host; // A channel provider is required for creating the cursor.
 
-            public ISchema Schema { get { return _row.Schema; } }
+            public Schema Schema => _row.Schema;
             public bool CanShuffle { get { return true; } } // The shuffling is even uniformly IID!! :)
 
             public OneRowDataView(IHostEnvironment env, IRow row)
@@ -510,7 +519,7 @@ namespace Microsoft.ML.Runtime.Data
                 _row = row;
             }
 
-            public IRowCursor GetRowCursor(Func<int, bool> needCol, IRandom rand = null)
+            public IRowCursor GetRowCursor(Func<int, bool> needCol, Random rand = null)
             {
                 _host.CheckValue(needCol, nameof(needCol));
                 _host.CheckValueOrNull(rand);
@@ -518,7 +527,7 @@ namespace Microsoft.ML.Runtime.Data
                 return new Cursor(_host, this, active);
             }
 
-            public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> needCol, int n, IRandom rand = null)
+            public IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> needCol, int n, Random rand = null)
             {
                 _host.CheckValue(needCol, nameof(needCol));
                 _host.CheckValueOrNull(rand);
@@ -526,7 +535,7 @@ namespace Microsoft.ML.Runtime.Data
                 return new IRowCursor[] { GetRowCursor(needCol, rand) };
             }
 
-            public long? GetRowCount(bool lazy = true)
+            public long? GetRowCount()
             {
                 return 1;
             }
@@ -536,7 +545,7 @@ namespace Microsoft.ML.Runtime.Data
                 private readonly OneRowDataView _parent;
                 private readonly bool[] _active;
 
-                public ISchema Schema { get { return _parent.Schema; } }
+                public Schema Schema => _parent.Schema;
                 public override long Batch { get { return 0; } }
 
                 public Cursor(IHost host, OneRowDataView parent, bool[] active)

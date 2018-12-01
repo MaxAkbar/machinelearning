@@ -2,16 +2,16 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Float = System.Single;
-
-using System;
-using System.Collections.Generic;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Internal.Utilities;
 using Microsoft.ML.Runtime.Model;
 using Microsoft.ML.Runtime.Model.Onnx;
 using Microsoft.ML.Runtime.Model.Pfa;
 using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
+using Float = System.Single;
 
 namespace Microsoft.ML.Runtime.Data
 {
@@ -42,8 +42,7 @@ namespace Microsoft.ML.Runtime.Data
             private readonly MetadataUtils.MetadataGetter<ReadOnlyMemory<char>> _getScoreColumnKind;
             private readonly MetadataUtils.MetadataGetter<ReadOnlyMemory<char>> _getScoreValueKind;
             private readonly IRow _predColMetadata;
-
-            private BindingsImpl(ISchema input, ISchemaBoundRowMapper mapper, string suffix, string scoreColumnKind,
+            private BindingsImpl(Schema input, ISchemaBoundRowMapper mapper, string suffix, string scoreColumnKind,
                 bool user, int scoreColIndex, ColumnType predColType)
                 : base(input, mapper, suffix, user, DefaultColumnNames.PredictedLabel)
             {
@@ -62,24 +61,24 @@ namespace Microsoft.ML.Runtime.Data
                 // bearing object makes pushing the logic into the multiclass scorer almost impossible.
                 if (predColType.IsKey)
                 {
-                    ColumnType scoreSlotsType = mapper.Schema.GetMetadataTypeOrNull(MetadataUtils.Kinds.SlotNames, scoreColIndex);
+                    ColumnType scoreSlotsType = mapper.OutputSchema.GetMetadataTypeOrNull(MetadataUtils.Kinds.SlotNames, scoreColIndex);
                     if (scoreSlotsType != null && scoreSlotsType.IsKnownSizeVector &&
                         scoreSlotsType.VectorSize == predColType.KeyCount)
                     {
                         Contracts.Assert(scoreSlotsType.VectorSize > 0);
                         IColumn col = Utils.MarshalInvoke(KeyValueMetadataFromMetadata<int>,
-                            scoreSlotsType.RawType, mapper.Schema, scoreColIndex, MetadataUtils.Kinds.SlotNames);
+                            scoreSlotsType.RawType, mapper.OutputSchema, scoreColIndex, MetadataUtils.Kinds.SlotNames);
                         _predColMetadata = RowColumnUtils.GetRow(null, col);
                     }
                     else
                     {
-                        scoreSlotsType = mapper.Schema.GetMetadataTypeOrNull(MetadataUtils.Kinds.TrainingLabelValues, scoreColIndex);
+                        scoreSlotsType = mapper.OutputSchema.GetMetadataTypeOrNull(MetadataUtils.Kinds.TrainingLabelValues, scoreColIndex);
                         if (scoreSlotsType != null && scoreSlotsType.IsKnownSizeVector &&
                             scoreSlotsType.VectorSize == predColType.KeyCount)
                         {
                             Contracts.Assert(scoreSlotsType.VectorSize > 0);
                             IColumn col = Utils.MarshalInvoke(KeyValueMetadataFromMetadata<int>,
-                                scoreSlotsType.RawType, mapper.Schema, scoreColIndex, MetadataUtils.Kinds.TrainingLabelValues);
+                                scoreSlotsType.RawType, mapper.OutputSchema, scoreColIndex, MetadataUtils.Kinds.TrainingLabelValues);
                             _predColMetadata = RowColumnUtils.GetRow(null, col);
                         }
                     }
@@ -98,7 +97,7 @@ namespace Microsoft.ML.Runtime.Data
                 return RowColumnUtils.GetColumn(MetadataUtils.Kinds.KeyValues, type, getter);
             }
 
-            public static BindingsImpl Create(ISchema input, ISchemaBoundRowMapper mapper, string suffix,
+            public static BindingsImpl Create(Schema input, ISchemaBoundRowMapper mapper, string suffix,
                 string scoreColKind, int scoreColIndex, ColumnType predColType)
             {
                 Contracts.AssertValue(input);
@@ -110,13 +109,13 @@ namespace Microsoft.ML.Runtime.Data
                     scoreColIndex, predColType);
             }
 
-            public BindingsImpl ApplyToSchema(ISchema input, ISchemaBindableMapper bindable, IHostEnvironment env)
+            public BindingsImpl ApplyToSchema(Schema input, ISchemaBindableMapper bindable, IHostEnvironment env)
             {
                 Contracts.AssertValue(env);
                 env.AssertValue(input);
                 env.AssertValue(bindable);
 
-                string scoreCol = RowMapper.Schema.GetColumnName(ScoreColumnIndex);
+                string scoreCol = RowMapper.OutputSchema.GetColumnName(ScoreColumnIndex);
                 var schema = new RoleMappedSchema(input, RowMapper.GetInputColumnRoles());
 
                 // Checks compatibility of the predictor input types.
@@ -124,13 +123,13 @@ namespace Microsoft.ML.Runtime.Data
                 var rowMapper = mapper as ISchemaBoundRowMapper;
                 env.CheckParam(rowMapper != null, nameof(bindable), "Mapper must implement ISchemaBoundRowMapper");
                 int mapperScoreColumn;
-                bool tmp = rowMapper.Schema.TryGetColumnIndex(scoreCol, out mapperScoreColumn);
+                bool tmp = rowMapper.OutputSchema.TryGetColumnIndex(scoreCol, out mapperScoreColumn);
                 env.Check(tmp, "Mapper doesn't have expected score column");
 
                 return new BindingsImpl(input, rowMapper, Suffix, ScoreColumnKind, true, mapperScoreColumn, PredColType);
             }
 
-            public static BindingsImpl Create(ModelLoadContext ctx, ISchema input,
+            public static BindingsImpl Create(ModelLoadContext ctx, Schema input,
                 IHostEnvironment env, ISchemaBindableMapper bindable,
                 Func<ColumnType, bool> outputTypeMatches, Func<ColumnType, ISchemaBoundRowMapper, ColumnType> getPredColType)
             {
@@ -154,9 +153,9 @@ namespace Microsoft.ML.Runtime.Data
 
                 // Find the score column of the mapper.
                 int scoreColIndex;
-                env.CheckDecode(mapper.Schema.TryGetColumnIndex(scoreCol, out scoreColIndex));
+                env.CheckDecode(mapper.OutputSchema.TryGetColumnIndex(scoreCol, out scoreColIndex));
 
-                var scoreType = mapper.Schema.GetColumnType(scoreColIndex);
+                var scoreType = mapper.OutputSchema.GetColumnType(scoreColIndex);
                 env.CheckDecode(outputTypeMatches(scoreType));
                 var predColType = getPredColType(scoreType, rowMapper);
 
@@ -173,7 +172,7 @@ namespace Microsoft.ML.Runtime.Data
                 // int: id of the column used for deriving the predicted label column
                 SaveBase(ctx);
                 ctx.SaveNonEmptyString(ScoreColumnKind);
-                ctx.SaveNonEmptyString(RowMapper.Schema.GetColumnName(ScoreColumnIndex));
+                ctx.SaveNonEmptyString(RowMapper.OutputSchema.GetColumnName(ScoreColumnIndex));
             }
 
             protected override ColumnType GetColumnTypeCore(int iinfo)
@@ -195,7 +194,7 @@ namespace Microsoft.ML.Runtime.Data
                     yield return TextType.Instance.GetPair(MetadataUtils.Kinds.ScoreValueKind);
                     if (_predColMetadata != null)
                     {
-                        ISchema sch = _predColMetadata.Schema;
+                        var sch = _predColMetadata.Schema;
                         for (int i = 0; i < sch.ColumnCount; ++i)
                             yield return new KeyValuePair<string, ColumnType>(sch.GetColumnName(i), sch.GetColumnType(i));
                     }
@@ -277,14 +276,12 @@ namespace Microsoft.ML.Runtime.Data
         }
 
         protected readonly BindingsImpl Bindings;
-        protected override BindingsBase GetBindings()
-        {
-            return Bindings;
-        }
+        protected override BindingsBase GetBindings() => Bindings;
+        public override Schema OutputSchema { get; }
 
-        public bool CanSavePfa => (Bindable as ICanSavePfa)?.CanSavePfa == true;
+        bool ICanSavePfa.CanSavePfa => (Bindable as ICanSavePfa)?.CanSavePfa == true;
 
-        public bool CanSaveOnnx => (Bindable as ICanSaveOnnx)?.CanSaveOnnx == true;
+        bool ICanSaveOnnx.CanSaveOnnx(OnnxContext ctx) => (Bindable as ICanSaveOnnx)?.CanSaveOnnx(ctx) == true;
 
         protected PredictedLabelScorerBase(ScorerArgumentsBase args, IHostEnvironment env, IDataView data,
             ISchemaBoundMapper mapper, RoleMappedSchema trainSchema, string registrationName, string scoreColKind, string scoreColName,
@@ -301,14 +298,15 @@ namespace Microsoft.ML.Runtime.Data
             Host.CheckParam(rowMapper != null, nameof(mapper), "mapper should implement " + nameof(ISchemaBoundRowMapper));
 
             int scoreColIndex;
-            if (!mapper.Schema.TryGetColumnIndex(scoreColName, out scoreColIndex))
+            if (!mapper.OutputSchema.TryGetColumnIndex(scoreColName, out scoreColIndex))
                 throw Host.ExceptParam(nameof(scoreColName), "mapper does not contain a column '{0}'", scoreColName);
 
-            var scoreType = mapper.Schema.GetColumnType(scoreColIndex);
+            var scoreType = mapper.OutputSchema.GetColumnType(scoreColIndex);
             Host.Check(outputTypeMatches(scoreType), "Unexpected predictor output type");
             var predColType = getPredColType(scoreType, rowMapper);
 
             Bindings = BindingsImpl.Create(data.Schema, rowMapper, args.Suffix, scoreColKind, scoreColIndex, predColType);
+            OutputSchema = Schema.Create(Bindings);
         }
 
         protected PredictedLabelScorerBase(IHostEnvironment env, PredictedLabelScorerBase transform,
@@ -316,6 +314,7 @@ namespace Microsoft.ML.Runtime.Data
             : base(env, newSource, registrationName, transform.Bindable)
         {
             Bindings = transform.Bindings.ApplyToSchema(newSource.Schema, Bindable, env);
+            OutputSchema = Schema.Create(Bindings);
         }
 
         protected PredictedLabelScorerBase(IHost host, ModelLoadContext ctx, IDataView input,
@@ -328,6 +327,7 @@ namespace Microsoft.ML.Runtime.Data
             Host.AssertValue(getPredColType);
 
             Bindings = BindingsImpl.Create(ctx, input.Schema, host, Bindable, outputTypeMatches, getPredColType);
+            OutputSchema = Schema.Create(Bindings);
         }
 
         protected override void SaveCore(ModelSaveContext ctx)
@@ -336,7 +336,7 @@ namespace Microsoft.ML.Runtime.Data
             Bindings.Save(ctx);
         }
 
-        public void SaveAsPfa(BoundPfaContext ctx)
+        void ISaveAsPfa.SaveAsPfa(BoundPfaContext ctx)
         {
             Host.CheckValue(ctx, nameof(ctx));
             Host.Assert(Bindable is IBindableCanSavePfa);
@@ -365,7 +365,10 @@ namespace Microsoft.ML.Runtime.Data
 
         protected abstract JToken PredictedLabelPfa(string[] mapperOutputs);
 
-        public virtual void SaveAsOnnx(OnnxContext ctx)
+        void ISaveAsOnnx.SaveAsOnnx(OnnxContext ctx) => SaveAsOnnxCore(ctx);
+
+        [BestFriend]
+        private protected virtual void SaveAsOnnxCore(OnnxContext ctx)
         {
             Host.CheckValue(ctx, nameof(ctx));
             Host.Assert(Bindable is IBindableCanSaveOnnx);
@@ -405,7 +408,7 @@ namespace Microsoft.ML.Runtime.Data
             Host.Assert(Bindings.DerivedColumnCount == 1);
             Host.AssertValue(output);
             Host.AssertValue(predicate);
-            Host.Assert(output.Schema == Bindings.RowMapper.Schema);
+            Host.Assert(output.Schema == Bindings.RowMapper.OutputSchema);
             Host.Assert(Bindings.InfoCount == output.Schema.ColumnCount + 1);
 
             var getters = new Delegate[Bindings.InfoCount];

@@ -4,9 +4,9 @@
 
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.EntryPoints;
 using Microsoft.ML.Runtime.Learners;
 using Microsoft.ML.Runtime.RunTests;
+using Microsoft.ML.Trainers;
 using Xunit;
 
 namespace Microsoft.ML.Tests.TrainerEstimators
@@ -26,7 +26,7 @@ namespace Microsoft.ML.Tests.TrainerEstimators
                             new TextLoader.Column("F2", DataKind.I4, 2),
                             new TextLoader.Column("Rest", type: null, new [] { new TextLoader.Range(3, 9) })
                         }
-                    }).Read(new MultiFileSource(GetDataPath(TestDatasets.breastCancer.trainFilename)));
+                    }).Read(GetDataPath(TestDatasets.breastCancer.trainFilename));
         }
 
         [Fact]
@@ -45,7 +45,7 @@ namespace Microsoft.ML.Tests.TrainerEstimators
         public void TestEstimatorPrior()
         {
             var dataView = GetBreastCancerDataviewWithTextColumns();
-            
+
             var pipe = new PriorTrainer(Contracts.CheckRef(Env, nameof(Env)).Register("PriorPredictor"), "Label");
             TestEstimatorCore(pipe, dataView);
             Done();

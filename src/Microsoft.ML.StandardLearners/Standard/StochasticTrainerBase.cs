@@ -6,6 +6,7 @@ using Microsoft.ML.Core.Data;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Internal.Calibration;
 using Microsoft.ML.Runtime.Training;
+using Microsoft.ML.Transforms;
 using System;
 
 namespace Microsoft.ML.Runtime.Learners
@@ -27,10 +28,9 @@ namespace Microsoft.ML.Runtime.Learners
         private static readonly TrainerInfo _info = new TrainerInfo();
         public override TrainerInfo Info => _info;
 
-        protected override TModel TrainModelCore(TrainContext context)
+        private protected override TModel TrainModelCore(TrainContext context)
         {
             Host.CheckValue(context, nameof(context));
-            TModel pred;
             using (var ch = Host.Start("Training"))
             {
                 var preparedData = PrepareDataFromTrainingExamples(ch, context.TrainingSet, out int weightSetCount);
@@ -39,10 +39,8 @@ namespace Microsoft.ML.Runtime.Learners
                 linInitPred = linInitPred ?? initPred as LinearPredictor;
                 Host.CheckParam(context.InitialPredictor == null || linInitPred != null, nameof(context),
                     "Initial predictor was not a linear predictor.");
-                pred = TrainCore(ch, preparedData, linInitPred, weightSetCount);
-                ch.Done();
+                return TrainCore(ch, preparedData, linInitPred, weightSetCount);
             }
-            return pred;
         }
 
         protected virtual int ComputeNumThreads(FloatLabelCursor.Factory cursorFactory)
@@ -74,12 +72,12 @@ namespace Microsoft.ML.Runtime.Learners
                 idvToFeedTrain = idvToShuffle;
             else
             {
-                var shuffleArgs = new ShuffleTransform.Arguments
+                var shuffleArgs = new RowShufflingTransformer.Arguments
                 {
                     PoolOnly = false,
                     ForceShuffle = ShuffleData
                 };
-                idvToFeedTrain = new ShuffleTransform(Host, shuffleArgs, idvToShuffle);
+                idvToFeedTrain = new RowShufflingTransformer(Host, shuffleArgs, idvToShuffle);
             }
 
             ch.Assert(idvToFeedTrain.CanShuffle);

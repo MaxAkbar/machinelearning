@@ -2,10 +2,11 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.FastTree;
 using Microsoft.ML.Runtime.Internal.Internallearn;
+using Microsoft.ML.Trainers.FastTree;
 using System;
 
 [assembly: EntryPointModule(typeof(FastTreeBinaryClassificationTrainer.Arguments))]
@@ -13,10 +14,10 @@ using System;
 [assembly: EntryPointModule(typeof(FastTreeTweedieTrainer.Arguments))]
 [assembly: EntryPointModule(typeof(FastTreeRankingTrainer.Arguments))]
 
-namespace Microsoft.ML.Runtime.FastTree
+namespace Microsoft.ML.Trainers.FastTree
 {
     [TlcModule.ComponentKind("FastTreeTrainer")]
-    public interface IFastTreeTrainerFactory : IComponentFactory<ITrainer>
+    internal interface IFastTreeTrainerFactory : IComponentFactory<ITrainer>
     {
     }
 
@@ -30,7 +31,7 @@ namespace Microsoft.ML.Runtime.FastTree
             [TGUI(Label = "Optimize for unbalanced")]
             public bool UnbalancedSets = false;
 
-            public ITrainer CreateComponent(IHostEnvironment env) => new FastTreeBinaryClassificationTrainer(env, this);
+            ITrainer IComponentFactory<ITrainer>.CreateComponent(IHostEnvironment env) => new FastTreeBinaryClassificationTrainer(env, this);
         }
     }
 
@@ -44,7 +45,7 @@ namespace Microsoft.ML.Runtime.FastTree
                 EarlyStoppingMetrics = 1; // Use L1 by default.
             }
 
-            public ITrainer CreateComponent(IHostEnvironment env) => new FastTreeRegressionTrainer(env, this);
+            ITrainer IComponentFactory<ITrainer>.CreateComponent(IHostEnvironment env) => new FastTreeRegressionTrainer(env, this);
         }
     }
 
@@ -61,7 +62,7 @@ namespace Microsoft.ML.Runtime.FastTree
                 "and intermediate values are compound Poisson loss.")]
             public Double Index = 1.5;
 
-            public ITrainer CreateComponent(IHostEnvironment env) => new FastTreeTweedieTrainer(env, this);
+            ITrainer IComponentFactory<ITrainer>.CreateComponent(IHostEnvironment env) => new FastTreeTweedieTrainer(env, this);
         }
     }
 
@@ -110,7 +111,7 @@ namespace Microsoft.ML.Runtime.FastTree
                 EarlyStoppingMetrics = 1;
             }
 
-            public ITrainer CreateComponent(IHostEnvironment env) => new FastTreeRankingTrainer(env, this);
+            ITrainer IComponentFactory<ITrainer>.CreateComponent(IHostEnvironment env) => new FastTreeRankingTrainer(env, this);
 
             internal override void Check(IExceptionContext ectx)
             {
@@ -142,7 +143,7 @@ namespace Microsoft.ML.Runtime.FastTree
     {
         internal const int NumTrees = 100;
         internal const int NumLeaves = 20;
-        internal const int MinDocumentsInLeafs = 10;
+        internal const int MinDocumentsInLeaves = 10;
         internal const double LearningRates = 0.2;
     }
 
@@ -244,7 +245,7 @@ namespace Microsoft.ML.Runtime.FastTree
         [Argument(ArgumentType.LastOccurenceWins, HelpText = "The minimal number of documents allowed in a leaf of a regression tree, out of the subsampled data", ShortName = "mil", SortOrder = 3)]
         [TGUI(Description = "Minimum number of training instances required to form a leaf", SuggestedSweeps = "1,10,50")]
         [TlcModule.SweepableDiscreteParamAttribute("MinDocumentsInLeafs", new object[] { 1, 10, 50 })]
-        public int MinDocumentsInLeafs = Defaults.MinDocumentsInLeafs;
+        public int MinDocumentsInLeafs = Defaults.MinDocumentsInLeaves;
 
         // REVIEW: Different shortname than FastRank module. Same as the TLC FRWrapper.
         [Argument(ArgumentType.LastOccurenceWins, HelpText = "Total number of decision trees to create in the ensemble", ShortName = "iter", SortOrder = 1)]

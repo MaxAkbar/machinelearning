@@ -4,16 +4,12 @@
 
 using Microsoft.ML.Core.Data;
 using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.TextAnalytics;
-using Microsoft.ML.StaticPipe;
 using Microsoft.ML.StaticPipe.Runtime;
+using Microsoft.ML.Transforms.Text;
 using System;
 using System.Collections.Generic;
-using static Microsoft.ML.Runtime.TextAnalytics.StopWordsRemoverTransform;
-using static Microsoft.ML.Runtime.TextAnalytics.TextNormalizerTransform;
 
-namespace Microsoft.ML.Transforms.Text
+namespace Microsoft.ML.StaticPipe
 {
     /// <summary>
     /// Extensions for statically typed word tokenizer.
@@ -24,7 +20,7 @@ namespace Microsoft.ML.Transforms.Text
         {
             public readonly Scalar<string> Input;
 
-            public OutPipelineColumn(Scalar<string> input, string separators)
+            public OutPipelineColumn(Scalar<string> input, char[] separators)
                 : base(new Reconciler(separators), input)
             {
                 Input = input;
@@ -33,9 +29,9 @@ namespace Microsoft.ML.Transforms.Text
 
         private sealed class Reconciler : EstimatorReconciler
         {
-            private readonly string _separators;
+            private readonly char[] _separators;
 
-            public Reconciler(string separators)
+            public Reconciler(char[] separators)
             {
                 _separators = separators;
             }
@@ -52,7 +48,7 @@ namespace Microsoft.ML.Transforms.Text
                 foreach (var outCol in toOutput)
                     pairs.Add((inputNames[((OutPipelineColumn)outCol).Input], outputNames[outCol]));
 
-                return new WordTokenizer(env, pairs.ToArray(), _separators);
+                return new WordTokenizingEstimator(env, pairs.ToArray(), _separators);
             }
         }
 
@@ -60,8 +56,8 @@ namespace Microsoft.ML.Transforms.Text
         /// Tokenize incoming text using <paramref name="separators"/> and output the tokens.
         /// </summary>
         /// <param name="input">The column to apply to.</param>
-        /// <param name="separators">The separators to use (comma separated).</param>
-        public static VarVector<string> TokenizeText(this Scalar<string> input, string separators = "space") => new OutPipelineColumn(input, separators);
+        /// <param name="separators">The separators to use (uses space character by default).</param>
+        public static VarVector<string> TokenizeText(this Scalar<string> input, char[] separators = null) => new OutPipelineColumn(input, separators);
     }
 
     /// <summary>
@@ -106,7 +102,7 @@ namespace Microsoft.ML.Transforms.Text
                 foreach (var outCol in toOutput)
                     pairs.Add((inputNames[((OutPipelineColumn)outCol).Input], outputNames[outCol]));
 
-                return new CharacterTokenizer(env, pairs.ToArray(), _useMarker);
+                return new TokenizingByCharactersEstimator(env, _useMarker, pairs.ToArray());
             }
         }
 
@@ -127,7 +123,7 @@ namespace Microsoft.ML.Transforms.Text
         {
             public readonly VarVector<string> Input;
 
-            public OutPipelineColumn(VarVector<string> input, Language language)
+            public OutPipelineColumn(VarVector<string> input, StopWordsRemovingEstimator.Language language)
                 : base(new Reconciler(language), input)
             {
                 Input = input;
@@ -136,9 +132,9 @@ namespace Microsoft.ML.Transforms.Text
 
         private sealed class Reconciler : EstimatorReconciler, IEquatable<Reconciler>
         {
-            private readonly Language _language;
+            private readonly StopWordsRemovingEstimator.Language _language;
 
-            public Reconciler(Language language)
+            public Reconciler(StopWordsRemovingEstimator.Language language)
             {
                 _language = language;
             }
@@ -156,11 +152,11 @@ namespace Microsoft.ML.Transforms.Text
             {
                 Contracts.Assert(toOutput.Length == 1);
 
-                var pairs = new List<(string input, string output)>();
+                var columns = new List<StopWordsRemovingTransformer.ColumnInfo>();
                 foreach (var outCol in toOutput)
-                    pairs.Add((inputNames[((OutPipelineColumn)outCol).Input], outputNames[outCol]));
+                    columns.Add(new StopWordsRemovingTransformer.ColumnInfo(inputNames[((OutPipelineColumn)outCol).Input], outputNames[outCol], _language));
 
-                return new StopwordRemover(env, pairs.ToArray(), _language);
+                return new StopWordsRemovingEstimator(env, columns.ToArray());
             }
         }
 
@@ -170,7 +166,7 @@ namespace Microsoft.ML.Transforms.Text
         /// <param name="input">The column to apply to.</param>
         /// <param name="language">Langauge of the input text.</param>
         public static VarVector<string> RemoveStopwords(this VarVector<string> input,
-            Language language = Language.English) => new OutPipelineColumn(input, language);
+            StopWordsRemovingEstimator.Language language = StopWordsRemovingEstimator.Language.English) => new OutPipelineColumn(input, language);
     }
 
     /// <summary>
@@ -182,7 +178,7 @@ namespace Microsoft.ML.Transforms.Text
         {
             public readonly Scalar<string> Input;
 
-            public OutPipelineColumn(Scalar<string> input, CaseNormalizationMode textCase, bool keepDiacritics, bool keepPunctuations, bool keepNumbers)
+            public OutPipelineColumn(Scalar<string> input, TextNormalizingEstimator.CaseNormalizationMode textCase, bool keepDiacritics, bool keepPunctuations, bool keepNumbers)
                 : base(new Reconciler(textCase, keepDiacritics, keepPunctuations, keepNumbers), input)
             {
                 Input = input;
@@ -191,12 +187,12 @@ namespace Microsoft.ML.Transforms.Text
 
         private sealed class Reconciler : EstimatorReconciler, IEquatable<Reconciler>
         {
-            private readonly CaseNormalizationMode _textCase;
+            private readonly TextNormalizingEstimator.CaseNormalizationMode _textCase;
             private readonly bool _keepDiacritics;
             private readonly bool _keepPunctuations;
             private readonly bool _keepNumbers;
 
-            public Reconciler(CaseNormalizationMode textCase, bool keepDiacritics, bool keepPunctuations, bool keepNumbers)
+            public Reconciler(TextNormalizingEstimator.CaseNormalizationMode textCase, bool keepDiacritics, bool keepPunctuations, bool keepNumbers)
             {
                 _textCase = textCase;
                 _keepDiacritics = keepDiacritics;
@@ -225,7 +221,7 @@ namespace Microsoft.ML.Transforms.Text
                 foreach (var outCol in toOutput)
                     pairs.Add((inputNames[((OutPipelineColumn)outCol).Input], outputNames[outCol]));
 
-                return new TextNormalizer(env, pairs.ToArray(), _textCase, _keepDiacritics, _keepPunctuations, _keepNumbers);
+                return new TextNormalizingEstimator(env, _textCase, _keepDiacritics, _keepPunctuations, _keepNumbers, pairs.ToArray());
             }
         }
 
@@ -238,7 +234,7 @@ namespace Microsoft.ML.Transforms.Text
         /// <param name="keepPunctuations">Whether to keep punctuation marks or remove them.</param>
         /// <param name="keepNumbers">Whether to keep numbers or remove them.</param>
         public static Scalar<string> NormalizeText(this Scalar<string> input,
-            CaseNormalizationMode textCase = CaseNormalizationMode.Lower,
+            TextNormalizingEstimator.CaseNormalizationMode textCase = TextNormalizingEstimator.CaseNormalizationMode.Lower,
             bool keepDiacritics = false,
             bool keepPunctuations = true,
             bool keepNumbers = true) => new OutPipelineColumn(input, textCase, keepDiacritics, keepPunctuations, keepNumbers);
@@ -258,7 +254,7 @@ namespace Microsoft.ML.Transforms.Text
                 int skipLength,
                 bool allLengths,
                 int maxNumTerms,
-                NgramTransform.WeightingCriteria weighting)
+                NgramExtractingEstimator.WeightingCriteria weighting)
                 : base(new Reconciler(ngramLength, skipLength, allLengths, maxNumTerms, weighting), input)
             {
                 Input = input;
@@ -271,9 +267,9 @@ namespace Microsoft.ML.Transforms.Text
             private readonly int _skipLength;
             private readonly bool _allLengths;
             private readonly int _maxNumTerms;
-            private readonly NgramTransform.WeightingCriteria _weighting;
+            private readonly NgramExtractingEstimator.WeightingCriteria _weighting;
 
-            public Reconciler(int ngramLength, int skipLength, bool allLengths, int maxNumTerms, NgramTransform.WeightingCriteria weighting)
+            public Reconciler(int ngramLength, int skipLength, bool allLengths, int maxNumTerms, NgramExtractingEstimator.WeightingCriteria weighting)
             {
                 _ngramLength = ngramLength;
                 _skipLength = skipLength;
@@ -323,7 +319,7 @@ namespace Microsoft.ML.Transforms.Text
             int skipLength = 0,
             bool allLengths = true,
             int maxNumTerms = 10000000,
-            NgramTransform.WeightingCriteria weighting = NgramTransform.WeightingCriteria.Tf)
+            NgramExtractingEstimator.WeightingCriteria weighting = NgramExtractingEstimator.WeightingCriteria.Tf)
                 => new OutPipelineColumn(input, ngramLength, skipLength, allLengths, maxNumTerms, weighting);
     }
 
@@ -427,14 +423,14 @@ namespace Microsoft.ML.Transforms.Text
     {
         private sealed class OutPipelineColumn : Vector<float>
         {
-            public readonly VarVector<Key<uint, string>> Input;
+            public readonly PipelineColumn Input;
 
-            public OutPipelineColumn(VarVector<Key<uint, string>> input,
+            public OutPipelineColumn(PipelineColumn input,
                 int ngramLength,
                 int skipLength,
                 bool allLengths,
                 int maxNumTerms,
-                NgramTransform.WeightingCriteria weighting)
+                NgramExtractingEstimator.WeightingCriteria weighting)
                 : base(new Reconciler(ngramLength, skipLength, allLengths, maxNumTerms, weighting), input)
             {
                 Input = input;
@@ -447,9 +443,9 @@ namespace Microsoft.ML.Transforms.Text
             private readonly int _skipLength;
             private readonly bool _allLengths;
             private readonly int _maxNumTerms;
-            private readonly NgramTransform.WeightingCriteria _weighting;
+            private readonly NgramExtractingEstimator.WeightingCriteria _weighting;
 
-            public Reconciler(int ngramLength, int skipLength, bool allLengths, int maxNumTerms, NgramTransform.WeightingCriteria weighting)
+            public Reconciler(int ngramLength, int skipLength, bool allLengths, int maxNumTerms, NgramExtractingEstimator.WeightingCriteria weighting)
             {
                 _ngramLength = ngramLength;
                 _skipLength = skipLength;
@@ -480,7 +476,7 @@ namespace Microsoft.ML.Transforms.Text
                 foreach (var outCol in toOutput)
                     pairs.Add((inputNames[((OutPipelineColumn)outCol).Input], outputNames[outCol]));
 
-                return new NgramEstimator(env, pairs.ToArray(), _ngramLength, _skipLength, _allLengths, _maxNumTerms, _weighting);
+                return new NgramExtractingEstimator(env, pairs.ToArray(), _ngramLength, _skipLength, _allLengths, _maxNumTerms, _weighting);
             }
         }
 
@@ -497,12 +493,12 @@ namespace Microsoft.ML.Transforms.Text
         /// <param name="allLengths">Whether to include all ngram lengths up to <paramref name="ngramLength"/> or only <paramref name="ngramLength"/>.</param>
         /// <param name="maxNumTerms">Maximum number of ngrams to store in the dictionary.</param>
         /// <param name="weighting">Statistical measure used to evaluate how important a word is to a document in a corpus.</param>
-        public static Vector<float> ToNgrams(this VarVector<Key<uint,string>> input,
+        public static Vector<float> ToNgrams<TKey>(this VarVector<Key<TKey, string>> input,
             int ngramLength = 1,
             int skipLength = 0,
             bool allLengths = true,
             int maxNumTerms = 10000000,
-            NgramTransform.WeightingCriteria weighting = NgramTransform.WeightingCriteria.Tf)
+            NgramExtractingEstimator.WeightingCriteria weighting = NgramExtractingEstimator.WeightingCriteria.Tf)
                 => new OutPipelineColumn(input, ngramLength, skipLength, allLengths, maxNumTerms, weighting);
     }
 
@@ -593,57 +589,5 @@ namespace Microsoft.ML.Transforms.Text
             uint seed = 314489979,
             bool ordered = true,
             int invertHash = 0) => new OutPipelineColumn(input, hashBits, ngramLength, skipLength, allLengths, seed, ordered, invertHash);
-    }
-
-    /// <summary>
-    /// Extensions for statically typed <see cref="LdaEstimator"/>.
-    /// </summary>
-    public static class LdaEstimatorExtensions
-    {
-        private sealed class OutPipelineColumn : Vector<float>
-        {
-            public readonly Vector<float> Input;
-
-            public OutPipelineColumn(Vector<float> input, int numTopic, Action<LdaTransform.Arguments> advancedSettings)
-                : base(new Reconciler(numTopic, advancedSettings), input)
-            {
-                Input = input;
-            }
-        }
-
-        private sealed class Reconciler : EstimatorReconciler
-        {
-            private readonly int _numTopic;
-            private readonly Action<LdaTransform.Arguments> _advancedSettings;
-
-            public Reconciler(int numTopic, Action<LdaTransform.Arguments> advancedSettings)
-            {
-                _numTopic = numTopic;
-                _advancedSettings = advancedSettings;
-            }
-
-            public override IEstimator<ITransformer> Reconcile(IHostEnvironment env,
-                PipelineColumn[] toOutput,
-                IReadOnlyDictionary<PipelineColumn, string> inputNames,
-                IReadOnlyDictionary<PipelineColumn, string> outputNames,
-                IReadOnlyCollection<string> usedNames)
-            {
-                Contracts.Assert(toOutput.Length == 1);
-
-                var pairs = new List<(string input, string output)>();
-                foreach (var outCol in toOutput)
-                    pairs.Add((inputNames[((OutPipelineColumn)outCol).Input], outputNames[outCol]));
-
-                return new LdaEstimator(env, pairs.ToArray(), _numTopic, _advancedSettings);
-            }
-        }
-
-        /// <include file='doc.xml' path='doc/members/member[@name="LightLDA"]/*' />
-        /// <param name="input">The column to apply to.</param>
-        /// <param name="numTopic">The number of topics in the LDA.</param>
-        /// <param name="advancedSettings">A delegate to apply all the advanced arguments to the algorithm.</param>
-        public static Vector<float> ToLdaTopicVector(this Vector<float> input,
-            int numTopic = 100,
-            Action<LdaTransform.Arguments> advancedSettings = null) => new OutPipelineColumn(input, numTopic, advancedSettings);
     }
 }

@@ -2,18 +2,21 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using System;
-using System.Collections.Generic;
-using System.IO;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Data.Conversion;
 using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.FastTree;
 using Microsoft.ML.Runtime.Internal.Calibration;
 using Microsoft.ML.Runtime.Internal.Utilities;
 using Microsoft.ML.Runtime.Model;
+using Microsoft.ML.Runtime.TreePredictor;
+using Microsoft.ML.Trainers.FastTree;
+using Microsoft.ML.Transforms;
+using System;
+using System.Collections.Generic;
+using System.IO;
 
 [assembly: LoadableClass(typeof(ISchemaBindableMapper), typeof(TreeEnsembleFeaturizerTransform), typeof(TreeEnsembleFeaturizerBindableMapper.Arguments),
     typeof(SignatureBindableMapper), "Tree Ensemble Featurizer Mapper", TreeEnsembleFeaturizerBindableMapper.LoadNameShort)]
@@ -171,8 +174,8 @@ namespace Microsoft.ML.Runtime.Data
 
             public RoleMappedSchema InputRoleMappedSchema { get; }
 
-            public ISchema Schema { get; }
-            public ISchema InputSchema => InputRoleMappedSchema.Schema;
+            public Schema InputSchema => InputRoleMappedSchema.Schema;
+            public Schema OutputSchema { get; }
 
             public ISchemaBindableMapper Bindable => _owner;
 
@@ -190,7 +193,7 @@ namespace Microsoft.ML.Runtime.Data
                 InputRoleMappedSchema = schema;
 
                 // A vector containing the output of each tree on a given example.
-                var treeValueType = new VectorType(NumberType.Float, _owner._ensemble.NumTrees);
+                var treeValueType = new VectorType(NumberType.Float, _owner._ensemble.TrainedEnsemble.NumTrees);
                 // An indicator vector with length = the total number of leaves in the ensemble, indicating which leaf the example
                 // ends up in all the trees in the ensemble.
                 var leafIdType = new VectorType(NumberType.Float, _owner._totalLeafCount);
@@ -201,8 +204,8 @@ namespace Microsoft.ML.Runtime.Data
                 // plus one (since the root node is not a child of any node). So we have #internal + #leaf = 2*(#internal) + 1,
                 // which means that #internal = #leaf - 1.
                 // Therefore, the number of internal nodes in the ensemble is #leaf - #trees.
-                var pathIdType = new VectorType(NumberType.Float, _owner._totalLeafCount - _owner._ensemble.NumTrees);
-                Schema = new SchemaImpl(ectx, owner, treeValueType, leafIdType, pathIdType);
+                var pathIdType = new VectorType(NumberType.Float, _owner._totalLeafCount - _owner._ensemble.TrainedEnsemble.NumTrees);
+                OutputSchema = Schema.Create(new SchemaImpl(ectx, owner, treeValueType, leafIdType, pathIdType));
             }
 
             public IRow GetRow(IRow input, Func<int, bool> predicate, out Action disposer)
@@ -210,7 +213,7 @@ namespace Microsoft.ML.Runtime.Data
                 _ectx.CheckValue(input, nameof(input));
                 _ectx.CheckValue(predicate, nameof(predicate));
                 disposer = null;
-                return new SimpleRow(Schema, input, CreateGetters(input, predicate));
+                return new SimpleRow(OutputSchema, input, CreateGetters(input, predicate));
             }
 
             private Delegate[] CreateGetters(IRow input, Func<int, bool> predicate)
@@ -279,10 +282,10 @@ namespace Microsoft.ML.Runtime.Data
                     _ectx = ectx;
                     _ectx.AssertValue(input);
                     _ectx.AssertValue(ensemble);
-                    _ectx.Assert(ensemble.NumTrees > 0);
+                    _ectx.Assert(ensemble.TrainedEnsemble.NumTrees > 0);
                     _input = input;
                     _ensemble = ensemble;
-                    _numTrees = _ensemble.NumTrees;
+                    _numTrees = _ensemble.TrainedEnsemble.NumTrees;
                     _numLeaves = numLeaves;
 
                     _src = default(VBuffer<float>);
@@ -301,14 +304,11 @@ namespace Microsoft.ML.Runtime.Data
                 public void GetTreeValues(ref VBuffer<float> dst)
                 {
                     EnsureCachedPosition();
-                    var vals = dst.Values;
-                    if (Utils.Size(vals) < _numTrees)
-                        vals = new float[_numTrees];
-
+                    var editor = VBufferEditor.Create(ref dst, _numTrees);
                     for (int i = 0; i < _numTrees; i++)
-                        vals[i] = _ensemble.GetLeafValue(i, _leafIds[i]);
+                        editor.Values[i] = _ensemble.GetLeafValue(i, _leafIds[i]);
 
-                    dst = new VBuffer<float>(_numTrees, vals, dst.Indices);
+                    dst = editor.Commit();
                 }
 
                 public void GetLeafIds(ref VBuffer<float> dst)
@@ -325,7 +325,7 @@ namespace Microsoft.ML.Runtime.Data
 
                         _leafIdBuilder.Reset(_numLeaves, false);
                         var offset = 0;
-                        var trees = _ensemble.GetTrees();
+                        var trees = ((ITreeEnsemble)_ensemble).GetTrees();
                         for (int i = 0; i < trees.Length; i++)
                         {
                             _leafIdBuilder.AddFeature(offset + _leafIds[i], 1);
@@ -349,7 +349,7 @@ namespace Microsoft.ML.Runtime.Data
                         if (_pathIdBuilder == null)
                             _pathIdBuilder = BufferBuilder<float>.CreateDefault();
 
-                        var trees = _ensemble.GetTrees();
+                        var trees = ((ITreeEnsemble)_ensemble).GetTrees();
                         _pathIdBuilder.Reset(_numLeaves - _numTrees, dense: false);
                         var offset = 0;
                         for (int i = 0; i < _numTrees; i++)
@@ -383,7 +383,7 @@ namespace Microsoft.ML.Runtime.Data
                         _ectx.Assert(Utils.Size(_pathIds) == _numTrees);
 
                         for (int i = 0; i < _numTrees; i++)
-                            _leafIds[i] = _ensemble.GetLeaf(i, ref _src, ref _pathIds[i]);
+                            _leafIds[i] = _ensemble.GetLeaf(i, in _src, ref _pathIds[i]);
 
                         _cachedPosition = _input.Position;
                     }
@@ -397,7 +397,7 @@ namespace Microsoft.ML.Runtime.Data
 
             public Func<int, bool> GetDependencies(Func<int, bool> predicate)
             {
-                for (int i = 0; i < Schema.ColumnCount; i++)
+                for (int i = 0; i < OutputSchema.ColumnCount; i++)
                 {
                     if (predicate(i))
                         return col => col == InputRoleMappedSchema.Feature.Index;
@@ -470,7 +470,7 @@ namespace Microsoft.ML.Runtime.Data
         {
             Contracts.AssertValue(ensemble);
 
-            var trees = ensemble.GetTrees();
+            var trees = ((ITreeEnsemble)ensemble).GetTrees();
             var numTrees = trees.Length;
             var totalLeafCount = 0;
             for (int i = 0; i < numTrees; i++)
@@ -480,58 +480,50 @@ namespace Microsoft.ML.Runtime.Data
 
         private void GetTreeSlotNames(int col, ref VBuffer<ReadOnlyMemory<char>> dst)
         {
-            var numTrees = _ensemble.NumTrees;
+            var numTrees = _ensemble.TrainedEnsemble.NumTrees;
 
-            var names = dst.Values;
-            if (Utils.Size(names) < numTrees)
-                names = new ReadOnlyMemory<char>[numTrees];
-
+            var editor = VBufferEditor.Create(ref dst, numTrees);
             for (int t = 0; t < numTrees; t++)
-                names[t] = string.Format("Tree{0:000}", t).AsMemory();
+                editor.Values[t] = string.Format("Tree{0:000}", t).AsMemory();
 
-            dst = new VBuffer<ReadOnlyMemory<char>>(numTrees, names, dst.Indices);
+            dst = editor.Commit();
         }
 
         private void GetLeafSlotNames(int col, ref VBuffer<ReadOnlyMemory<char>> dst)
         {
-            var numTrees = _ensemble.NumTrees;
+            var numTrees = _ensemble.TrainedEnsemble.NumTrees;
 
-            var names = dst.Values;
-            if (Utils.Size(names) < _totalLeafCount)
-                names = new ReadOnlyMemory<char>[_totalLeafCount];
-
+            var editor = VBufferEditor.Create(ref dst, _totalLeafCount);
             int i = 0;
             int t = 0;
-            foreach (var tree in _ensemble.GetTrees())
+            foreach (var tree in ((ITreeEnsemble)_ensemble).GetTrees())
             {
                 for (int l = 0; l < tree.NumLeaves; l++)
-                    names[i++] = string.Format("Tree{0:000}Leaf{1:000}", t, l).AsMemory();
+                    editor.Values[i++] = string.Format("Tree{0:000}Leaf{1:000}", t, l).AsMemory();
                 t++;
             }
             _host.Assert(i == _totalLeafCount);
-            dst = new VBuffer<ReadOnlyMemory<char>>(_totalLeafCount, names, dst.Indices);
+            dst = editor.Commit();
         }
 
         private void GetPathSlotNames(int col, ref VBuffer<ReadOnlyMemory<char>> dst)
         {
-            var numTrees = _ensemble.NumTrees;
+            var numTrees = _ensemble.TrainedEnsemble.NumTrees;
 
             var totalNodeCount = _totalLeafCount - numTrees;
-            var names = dst.Values;
-            if (Utils.Size(names) < totalNodeCount)
-                names = new ReadOnlyMemory<char>[totalNodeCount];
+            var editor = VBufferEditor.Create(ref dst, totalNodeCount);
 
             int i = 0;
             int t = 0;
-            foreach (var tree in _ensemble.GetTrees())
+            foreach (var tree in ((ITreeEnsemble)_ensemble).GetTrees())
             {
                 var numLeaves = tree.NumLeaves;
                 for (int l = 0; l < tree.NumLeaves - 1; l++)
-                    names[i++] = string.Format("Tree{0:000}Node{1:000}", t, l).AsMemory();
+                    editor.Values[i++] = string.Format("Tree{0:000}Node{1:000}", t, l).AsMemory();
                 t++;
             }
             _host.Assert(i == totalNodeCount);
-            dst = new VBuffer<ReadOnlyMemory<char>>(totalNodeCount, names, dst.Indices);
+            dst = editor.Commit();
         }
 
         public ISchemaBoundMapper Bind(IHostEnvironment env, RoleMappedSchema schema)
@@ -545,9 +537,11 @@ namespace Microsoft.ML.Runtime.Data
     }
 
     /// <include file='doc.xml' path='doc/members/member[@name="TreeEnsembleFeaturizerTransform"]'/>
-    public static class TreeEnsembleFeaturizerTransform
+    [BestFriend]
+    internal static class TreeEnsembleFeaturizerTransform
     {
-        public sealed class Arguments : TrainAndScoreTransform.ArgumentsBase
+#pragma warning disable CS0649 // The fields will still be set via the reflection driven mechanisms.
+        public sealed class Arguments : TrainAndScoreTransformer.ArgumentsBase
         {
             [Argument(ArgumentType.Multiple, HelpText = "Trainer to use", ShortName = "tr", NullName = "<None>", SortOrder = 1, SignatureType = typeof(SignatureTreeEnsembleTrainer))]
             public IComponentFactory<ITrainer> Trainer;
@@ -584,6 +578,7 @@ namespace Microsoft.ML.Runtime.Data
             [Argument(ArgumentType.Required, HelpText = "Trainer to use", SortOrder = 10, Visibility = ArgumentAttribute.VisibilityType.EntryPointsOnly)]
             public IPredictorModel PredictorModel;
         }
+#pragma warning restore CS0649
 
         internal const string TreeEnsembleSummary =
             "Trains a tree ensemble, or loads it from a file, then maps a numeric feature vector " +
@@ -644,7 +639,7 @@ namespace Microsoft.ML.Runtime.Data
                         ModelLoadContext.LoadModel<IPredictor, SignatureLoadModel>(host, out predictor, rep, ModelFileUtils.DirPredictor);
 
                     ch.Trace("Creating scorer");
-                    var data = TrainAndScoreTransform.CreateDataFromArgs(ch, input, args);
+                    var data = TrainAndScoreTransformer.CreateDataFromArgs(ch, input, args);
 
                     // Make sure that the given predictor has the correct number of input features.
                     if (predictor is CalibratedPredictorBase)
@@ -670,7 +665,7 @@ namespace Microsoft.ML.Runtime.Data
 
                     ch.Trace("Creating TrainAndScoreTransform");
 
-                    var trainScoreArgs = new TrainAndScoreTransform.Arguments();
+                    var trainScoreArgs = new TrainAndScoreTransformer.Arguments();
                     args.CopyTo(trainScoreArgs);
                     trainScoreArgs.Trainer = args.Trainer;
 
@@ -681,14 +676,12 @@ namespace Microsoft.ML.Runtime.Data
                             (e, predictor) => new TreeEnsembleFeaturizerBindableMapper(e, scorerArgs, predictor));
 
                     var labelInput = AppendLabelTransform(host, ch, input, trainScoreArgs.LabelColumn, args.LabelPermutationSeed);
-                    var scoreXf = TrainAndScoreTransform.Create(host, trainScoreArgs, labelInput, mapperFactory);
+                    var scoreXf = TrainAndScoreTransformer.Create(host, trainScoreArgs, labelInput, mapperFactory);
 
                     if (input == labelInput)
                         return scoreXf;
                     return (IDataTransform)ApplyTransformUtils.ApplyAllTransformsToData(host, scoreXf, input, labelInput);
                 }
-
-                ch.Done();
             }
             return xf;
         }
@@ -702,7 +695,6 @@ namespace Microsoft.ML.Runtime.Data
             host.CheckValue(input, nameof(input));
             host.CheckUserArg(args.PredictorModel != null, nameof(args.PredictorModel), "Please specify a predictor model.");
 
-            IDataTransform xf;
             using (var ch = host.Start("Create Tree Ensemble Scorer"))
             {
                 var scorerArgs = new TreeEnsembleFeaturizerBindableMapper.Arguments() { Suffix = args.Suffix };
@@ -729,10 +721,8 @@ namespace Microsoft.ML.Runtime.Data
 
                 var bindable = new TreeEnsembleFeaturizerBindableMapper(env, scorerArgs, predictor);
                 var bound = bindable.Bind(env, data.Schema);
-                xf = new GenericScorer(env, scorerArgs, data.Data, bound, data.Schema);
-                ch.Done();
+               return new GenericScorer(env, scorerArgs, data.Data, bound, data.Schema);
             }
-            return xf;
         }
 
         private static IDataView AppendFloatMapper<TInput>(IHostEnvironment env, IChannel ch, IDataView input,
@@ -750,14 +740,14 @@ namespace Microsoft.ML.Runtime.Data
             if (seed == 0)
             {
                 mapper =
-                    (ref TInput src, ref Single dst) =>
+                    (in TInput src, ref Single dst) =>
                     {
-                        if (isNa(ref src))
+                        if (isNa(in src))
                         {
                             dst = Single.NaN;
                             return;
                         }
-                        converter(ref src, ref temp);
+                        converter(in src, ref temp);
                         dst = (Single)(temp - 1);
                     };
             }
@@ -766,14 +756,14 @@ namespace Microsoft.ML.Runtime.Data
                 ch.Check(type.Count > 0, "Label must be of known cardinality.");
                 int[] permutation = Utils.GetRandomPermutation(RandomUtils.Create(seed), type.Count);
                 mapper =
-                    (ref TInput src, ref Single dst) =>
+                    (in TInput src, ref Single dst) =>
                     {
-                        if (isNa(ref src))
+                        if (isNa(in src))
                         {
                             dst = Single.NaN;
                             return;
                         }
-                        converter(ref src, ref temp);
+                        converter(in src, ref temp);
                         dst = (Single)permutation[(int)(temp - 1)];
                     };
             }
@@ -804,8 +794,9 @@ namespace Microsoft.ML.Runtime.Data
         }
     }
 
-    public static partial class TreeFeaturize
+    internal static partial class TreeFeaturize
     {
+#pragma warning disable CS0649 // The fields will still be set via the reflection driven mechanisms.
         [TlcModule.EntryPoint(Name = "Transforms.TreeLeafFeaturizer",
             Desc = TreeEnsembleFeaturizerTransform.TreeEnsembleSummary,
             UserName = TreeEnsembleFeaturizerTransform.UserName,
@@ -821,5 +812,6 @@ namespace Microsoft.ML.Runtime.Data
             var xf = TreeEnsembleFeaturizerTransform.CreateForEntryPoint(env, input, input.Data);
             return new CommonOutputs.TransformOutput { Model = new TransformModel(env, xf, input.Data), OutputData = xf };
         }
+#pragma warning restore CS0649
     }
 }

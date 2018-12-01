@@ -2,13 +2,15 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using System;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.EntryPoints;
 using Microsoft.ML.Runtime.Internal.Utilities;
 using Microsoft.ML.Runtime.Model;
+using Microsoft.ML.Transforms;
+using System;
 
 [assembly: LoadableClass(SkipTakeFilter.SkipTakeFilterSummary, typeof(SkipTakeFilter), typeof(SkipTakeFilter.Arguments), typeof(SignatureDataTransform),
     SkipTakeFilter.SkipTakeFilterUserName, "SkipTakeFilter", SkipTakeFilter.SkipTakeFilterShortName)]
@@ -22,7 +24,7 @@ using Microsoft.ML.Runtime.Model;
 [assembly: LoadableClass(SkipTakeFilter.SkipTakeFilterSummary, typeof(SkipTakeFilter), null, typeof(SignatureLoadDataTransform),
     "Skip and Take Filter", SkipTakeFilter.LoaderSignature)]
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Transforms
 {
     /// <summary>
     /// Allows limiting input to a subset of row at an optional offset.  Can be used to implement data paging.
@@ -168,11 +170,11 @@ namespace Microsoft.ML.Runtime.Data
         /// Returns the computed count of rows remaining after skip and take operation.
         /// Returns null if count is unknown.
         /// </summary>
-        public override long? GetRowCount(bool lazy = true)
+        public override long? GetRowCount()
         {
             if (_take == 0)
                 return 0;
-            long? count = Source.GetRowCount(lazy);
+            long? count = Source.GetRowCount();
             if (count == null)
                 return null;
 
@@ -186,18 +188,18 @@ namespace Microsoft.ML.Runtime.Data
             return false;
         }
 
-        protected override IRowCursor GetRowCursorCore(Func<int, bool> predicate, IRandom rand = null)
+        protected override IRowCursor GetRowCursorCore(Func<int, bool> predicate, Random rand = null)
         {
             Host.AssertValue(predicate);
             Host.AssertValueOrNull(rand);
 
             var input = Source.GetRowCursor(predicate);
-            var activeColumns = Utils.BuildArray(Schema.ColumnCount, predicate);
-            return new RowCursor(Host, input, Schema, activeColumns, _skip, _take);
+            var activeColumns = Utils.BuildArray(OutputSchema.ColumnCount, predicate);
+            return new RowCursor(Host, input, OutputSchema, activeColumns, _skip, _take);
         }
 
         public override IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator,
-            Func<int, bool> predicate, int n, IRandom rand = null)
+            Func<int, bool> predicate, int n, Random rand = null)
         {
             Host.CheckValue(predicate, nameof(predicate));
             Host.CheckValueOrNull(rand);
@@ -217,7 +219,7 @@ namespace Microsoft.ML.Runtime.Data
                 get { return 0; }
             }
 
-            public RowCursor(IChannelProvider provider, IRowCursor input, ISchema schema, bool[] active, long skip, long take)
+            public RowCursor(IChannelProvider provider, IRowCursor input, Schema schema, bool[] active, long skip, long take)
                 : base(provider, input, schema, active)
             {
                 Ch.Assert(skip >= 0);

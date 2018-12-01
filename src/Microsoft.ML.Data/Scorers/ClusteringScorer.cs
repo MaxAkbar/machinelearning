@@ -94,7 +94,7 @@ namespace Microsoft.ML.Runtime.Data
         protected override Delegate GetPredictedLabelGetter(IRow output, out Delegate scoreGetter)
         {
             Contracts.AssertValue(output);
-            Contracts.Assert(output.Schema == Bindings.RowMapper.Schema);
+            Contracts.Assert(output.Schema == Bindings.RowMapper.OutputSchema);
             Contracts.Assert(output.IsColumnActive(Bindings.ScoreColumnIndex));
 
             ValueGetter<VBuffer<Float>> mapperScoreGetter = output.GetGetter<VBuffer<Float>>(Bindings.ScoreColumnIndex);
@@ -108,7 +108,7 @@ namespace Microsoft.ML.Runtime.Data
                 {
                     EnsureCachedPosition(ref cachedPosition, ref score, output, mapperScoreGetter);
                     Contracts.Check(score.Length == scoreLength);
-                    int index = VectorUtils.ArgMin(ref score);
+                    int index = VectorUtils.ArgMin(in score);
                     if (index < 0)
                         dst = 0;
                     else

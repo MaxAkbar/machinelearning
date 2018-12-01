@@ -19,7 +19,7 @@ using Newtonsoft.Json.Linq;
 
 namespace Microsoft.ML.Runtime.Model.Pfa
 {
-    public sealed class SavePfaCommand : DataCommand.ImplBase<SavePfaCommand.Arguments>
+    internal sealed class SavePfaCommand : DataCommand.ImplBase<SavePfaCommand.Arguments>
     {
         public const string Summary = "Given a data model, write out the corresponding PFA.";
         public const string LoadName = "SavePfa";
@@ -94,7 +94,6 @@ namespace Microsoft.ML.Runtime.Model.Pfa
             using (var ch = Host.Start("Run"))
             {
                 Run(ch);
-                ch.Done();
             }
         }
 

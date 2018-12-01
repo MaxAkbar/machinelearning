@@ -10,10 +10,11 @@ using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.Data.IO;
-using Microsoft.ML.Runtime.DataPipe;
+using Microsoft.ML.Transforms;
 using Microsoft.ML.Runtime.EntryPoints;
 using Microsoft.ML.Runtime.Internal.Utilities;
 using Microsoft.ML.Runtime.Model;
+using Microsoft.ML.Data;
 
 [assembly: LoadableClass(OptionalColumnTransform.Summary, typeof(OptionalColumnTransform),
     typeof(OptionalColumnTransform.Arguments), typeof(SignatureDataTransform),
@@ -24,7 +25,7 @@ using Microsoft.ML.Runtime.Model;
 
 [assembly: EntryPointModule(typeof(OptionalColumnTransform))]
 
-namespace Microsoft.ML.Runtime.DataPipe
+namespace Microsoft.ML.Transforms
 {
     /// <include file='doc.xml' path='doc/members/member[@name="OptionalColumnTransform"]/*' />
     public class OptionalColumnTransform : RowToRowMapperTransformBase
@@ -45,7 +46,7 @@ namespace Microsoft.ML.Runtime.DataPipe
             // The input schema of the original data view that contains the source columns. We need this
             // so that we can have the metadata even when we load this transform with new data that does not have
             // these columns.
-            private readonly ISchema _inputWithOptionalColumn;
+            private readonly Schema _inputWithOptionalColumn;
             private readonly int[] _srcColsWithOptionalColumn;
 
             private Bindings(OptionalColumnTransform parent, ColumnType[] columnTypes, int[] srcCols,
@@ -60,7 +61,7 @@ namespace Microsoft.ML.Runtime.DataPipe
                 SrcCols = srcCols;
                 _parent = parent;
                 _metadata = new MetadataDispatcher(InfoCount);
-                _inputWithOptionalColumn = inputWithOptionalColumn;
+                _inputWithOptionalColumn = Schema.Create(inputWithOptionalColumn);
                 _srcColsWithOptionalColumn = srcColsWithOptionalColumn;
                 SetMetadata();
             }
@@ -235,7 +236,7 @@ namespace Microsoft.ML.Runtime.DataPipe
         private const string RegistrationName = "OptionalColumn";
 
         /// <summary>
-        /// Convenience constructor for public facing API.
+        /// Initializes a new instance of <see cref="OptionalColumnTransform"/>.
         /// </summary>
         /// <param name="env">Host Environment.</param>
         /// <param name="input">Input <see cref="IDataView"/>. This is the output from previous transform or loader.</param>
@@ -288,7 +289,7 @@ namespace Microsoft.ML.Runtime.DataPipe
             _bindings.Save(Host, ctx);
         }
 
-        public override ISchema Schema { get { return _bindings; } }
+        public override Schema OutputSchema => _bindings.AsSchema;
 
         protected override bool? ShouldUseParallelCursors(Func<int, bool> predicate)
         {
@@ -296,7 +297,7 @@ namespace Microsoft.ML.Runtime.DataPipe
             return null;
         }
 
-        protected override IRowCursor GetRowCursorCore(Func<int, bool> predicate, IRandom rand = null)
+        protected override IRowCursor GetRowCursorCore(Func<int, bool> predicate, Random rand = null)
         {
             Host.AssertValue(predicate, "predicate");
             Host.AssertValueOrNull(rand);
@@ -308,7 +309,7 @@ namespace Microsoft.ML.Runtime.DataPipe
         }
 
         public override IRowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator,
-            Func<int, bool> predicate, int n, IRandom rand = null)
+            Func<int, bool> predicate, int n, Random rand = null)
         {
             Host.CheckValue(predicate, nameof(predicate));
             Host.CheckValueOrNull(rand);
@@ -374,7 +375,6 @@ namespace Microsoft.ML.Runtime.DataPipe
                         getters[iinfo] = (Delegate)meth.Invoke(this, new object[] { input, iinfo });
                     }
                 }
-                ch.Done();
                 return getters;
             }
         }
@@ -399,7 +399,8 @@ namespace Microsoft.ML.Runtime.DataPipe
 
         private Delegate MakeGetterVec<T>(int length)
         {
-            return (ValueGetter<VBuffer<T>>)((ref VBuffer<T> value) => value = new VBuffer<T>(length, 0, value.Values, value.Indices));
+            return (ValueGetter<VBuffer<T>>)((ref VBuffer<T> value) =>
+                VBufferUtils.Resize(ref value, length, 0));
         }
 
         private sealed class RowCursor : SynchronizedCursorBase<IRowCursor>, IRowCursor
@@ -426,7 +427,7 @@ namespace Microsoft.ML.Runtime.DataPipe
                 }
             }
 
-            public ISchema Schema { get { return _bindings; } }
+            public Schema Schema => _bindings.AsSchema;
 
             public bool IsColumnActive(int col)
             {
@@ -468,7 +469,8 @@ namespace Microsoft.ML.Runtime.DataPipe
 
             private Delegate MakeGetterVec<T>(int length)
             {
-                return (ValueGetter<VBuffer<T>>)((ref VBuffer<T> value) => value = new VBuffer<T>(length, 0, value.Values, value.Indices));
+                return (ValueGetter<VBuffer<T>>)((ref VBuffer<T> value) =>
+                    VBufferUtils.Resize(ref value, length, 0));
             }
         }
 

@@ -10,7 +10,7 @@ using System.Linq;
 using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.FastTree.Internal;
+using Microsoft.ML.Trainers.FastTree.Internal;
 using Microsoft.ML.Runtime.Internal.Utilities;
 using Microsoft.ML.Runtime.Sweeper.Algorithms;
 
@@ -259,7 +259,7 @@ namespace Microsoft.ML.Runtime.Sweeper.Algorithms
                     else
                     {
                         // If Beta flag set, sample from independent Beta distributions instead.
-                        SysRandom rng = new SysRandom();
+                        Random rng = new Random();
                         double alpha = 1 + 15 * fitness;
                         foreach (int index in numericParamIndices)
                         {
@@ -375,7 +375,7 @@ namespace Microsoft.ML.Runtime.Sweeper.Algorithms
             for (int i = 0; i < weights.Length; i++)
                 weights[i] /= (counts[i] > 0 ? counts[i] : 1);
 
-            // If any learner has not been seen, default it's average to
+            // If any learner has not been seen, default its average to
             // best value to encourage exploration of untried algorithms.
             double bestVal = isMaximizing ?
                 previousRuns.Cast<RunResult>().Where(r => r.HasMetricValue).Max(r => r.MetricValue) :
