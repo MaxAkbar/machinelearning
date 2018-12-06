@@ -233,6 +233,17 @@ namespace Microsoft.ML.Runtime.RunTests
             Done();
         }
 
+        [Fact]
+        [TestCategory("Multiclass")]
+        public void MulticlassReductionTest()
+        {
+            RunOneAllTests(TestLearners.Ova, TestDatasets.iris);
+            RunOneAllTests(TestLearners.OvaWithFastForest, TestDatasets.iris);
+            RunOneAllTests(TestLearners.Pkpd, TestDatasets.iris);
+
+            Done();
+        }
+
         [Fact(Skip = "Need CoreTLC specific baseline update")]
         [TestCategory("Clustering")]
         [TestCategory("KMeans")]
@@ -661,7 +672,7 @@ namespace Microsoft.ML.Runtime.RunTests
                 Assert.True(scoredArray[i].Schema.TryGetColumnIndex("PredictedLabel", out predColArray[i]));
             }
 
-            var cursors = new IRowCursor[predCount];
+            var cursors = new RowCursor[predCount];
             for (int i = 0; i < predCount; i++)
                 cursors[i] = scoredArray[i].GetRowCursor(c => c == scoreColArray[i] || c == probColArray[i] || c == predColArray[i]);
 
@@ -839,7 +850,7 @@ namespace Microsoft.ML.Runtime.RunTests
                 }
             }
 
-            var cursors = new IRowCursor[predCount];
+            var cursors = new RowCursor[predCount];
             for (int i = 0; i < predCount; i++)
                 cursors[i] = scoredArray[i].GetRowCursor(c => c == scoreColArray[i] || c == probColArray[i] || c == predColArray[i]);
 

@@ -25,16 +25,16 @@ namespace Microsoft.ML.TimeSeries
         IStatefulTransformer Clone();
     }
 
-    internal interface IStatefulRow : IRow
+    internal abstract class StatefulRow : Row
     {
-        Action<long> GetPinger();
+        public abstract Action<long> GetPinger();
     }
 
     internal interface IStatefulRowMapper : IRowMapper
     {
         void CloneState();
 
-        Action<long> CreatePinger(IRow input, Func<int, bool> activeOutput, out Action disposer);
+        Action<long> CreatePinger(Row input, Func<int, bool> activeOutput, out Action disposer);
     }
 
     /// <summary>
@@ -53,6 +53,12 @@ namespace Microsoft.ML.TimeSeries
         private long _rowPosition;
         private ITransformer InputTransformer { get; set; }
 
+        /// <summary>
+        /// Checkpoints <see cref="TimeSeriesPredictionFunction{TSrc, TDst}"/> to disk with the updated
+        /// state.
+        /// </summary>
+        /// <param name="env">Usually <see cref="MLContext"/>.</param>
+        /// <param name="modelPath">Path to file on disk where the updated model needs to be saved.</param>
         public void CheckPoint(IHostEnvironment env, string modelPath)
         {
             using (var file = File.Create(modelPath))
@@ -92,8 +98,8 @@ namespace Microsoft.ML.TimeSeries
         {
         }
 
-        internal IRow GetStatefulRows(IRow input, IRowToRowMapper mapper, Func<int, bool> active,
-            List<IStatefulRow> rows, out Action disposer)
+        internal Row GetStatefulRows(Row input, IRowToRowMapper mapper, Func<int, bool> active,
+            List<StatefulRow> rows, out Action disposer)
         {
             Contracts.CheckValue(input, nameof(input));
             Contracts.CheckValue(active, nameof(active));
@@ -117,8 +123,8 @@ namespace Microsoft.ML.TimeSeries
                 }
 
                 var row = mapper.GetRow(input, active, out disposer);
-                if (row is IStatefulRow)
-                    rows.Add((IStatefulRow)row);
+                if (row is StatefulRow statefulRow)
+                    rows.Add(statefulRow);
 
                 return row;
             }
@@ -131,13 +137,13 @@ namespace Microsoft.ML.TimeSeries
             for (int i = deps.Length - 1; i >= 1; --i)
                 deps[i - 1] = innerMappers[i].GetDependencies(deps[i]);
 
-            IRow result = input;
+            Row result = input;
             for (int i = 0; i < innerMappers.Length; ++i)
             {
                 Action localDisp;
                 result = GetStatefulRows(result, innerMappers[i], deps[i], rows, out localDisp);
-                if (result is IStatefulRow)
-                    rows.Add((IStatefulRow)result);
+                if (result is StatefulRow statefulResult)
+                    rows.Add(statefulResult);
 
                 if (localDisp != null)
                 {
@@ -152,25 +158,21 @@ namespace Microsoft.ML.TimeSeries
             return result;
         }
 
-        private Action<long> CreatePinger(List<IStatefulRow> rows)
+        private Action<long> CreatePinger(List<StatefulRow> rows)
         {
-            Action<long>[] pingers = new Action<long>[rows.Count];
-            int index = 0;
+            if (rows.Count == 0)
+                return position => { };
+            Action<long> pinger = null;
             foreach (var row in rows)
-                pingers[index++] = row.GetPinger();
-
-            return (long position) =>
-            {
-                foreach (var ping in pingers)
-                    ping(position);
-            };
+                pinger += row.GetPinger();
+            return pinger;
         }
 
         internal override void PredictionEngineCore(IHostEnvironment env, DataViewConstructionUtils.InputRow<TSrc> inputRow, IRowToRowMapper mapper, bool ignoreMissingColumns,
                  SchemaDefinition inputSchemaDefinition, SchemaDefinition outputSchemaDefinition, out Action disposer, out IRowReadableAs<TDst> outputRow)
         {
-            List<IStatefulRow> rows = new List<IStatefulRow>();
-            IRow outputRowLocal = outputRowLocal = GetStatefulRows(inputRow, mapper, col => true, rows, out disposer);
+            List<StatefulRow> rows = new List<StatefulRow>();
+            Row outputRowLocal = outputRowLocal = GetStatefulRows(inputRow, mapper, col => true, rows, out disposer);
             var cursorable = TypedCursorable<TDst>.Create(env, new EmptyDataView(env, mapper.OutputSchema), ignoreMissingColumns, outputSchemaDefinition);
             _pinger = CreatePinger(rows);
             outputRow = cursorable.GetRow(outputRowLocal);
@@ -246,6 +248,26 @@ namespace Microsoft.ML.TimeSeries
 
     public static class PredictionFunctionExtensions
     {
+        /// <summary>
+        /// <see cref="TimeSeriesPredictionFunction{TSrc, TDst}"/> creates a prediction function/engine for a time series pipeline
+        /// It updates the state of time series model with observations seen at prediction phase and allows checkpointing the model.
+        /// </summary>
+        /// <typeparam name="TSrc">Class describing input schema to the model.</typeparam>
+        /// <typeparam name="TDst">Class describing the output schema of the prediction.</typeparam>
+        /// <param name="transformer">The time series pipeline in the form of a <see cref="ITransformer"/>.</param>
+        /// <param name="env">Usually <see cref="MLContext"/></param>
+        /// <param name="ignoreMissingColumns">To ignore missing columns. Default is false.</param>
+        /// <param name="inputSchemaDefinition">Input schema definition. Default is null.</param>
+        /// <param name="outputSchemaDefinition">Output schema definition. Default is null.</param>
+        /// <p>Example code can be found by searching for <i>TimeSeriesPredictionFunction</i> in <a href='https://github.com/dotnet/machinelearning'>ML.NET.</a></p>
+        /// <example>
+        /// <format type="text/markdown">
+        /// <![CDATA[
+        /// [!code-csharp[MF](~/../docs/samples/docs/samples/Microsoft.ML.Samples/Dynamic/IidSpikeDetectorTransform.cs)]
+        /// [!code-csharp[MF](~/../docs/samples/docs/samples/Microsoft.ML.Samples/Dynamic/IidChangePointDetectorTransform.cs)]
+        /// ]]>
+        /// </format>
+        /// </example>
         public static TimeSeriesPredictionFunction<TSrc, TDst> CreateTimeSeriesPredictionFunction<TSrc, TDst>(this ITransformer transformer, IHostEnvironment env,
             bool ignoreMissingColumns = false, SchemaDefinition inputSchemaDefinition = null, SchemaDefinition outputSchemaDefinition = null)
             where TSrc : class

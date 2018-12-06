@@ -206,7 +206,8 @@ namespace Microsoft.ML.Runtime.TimeSeriesProcessing
         /// </summary>
         /// <param name="env">Host Environment.</param>
         /// <param name="inputColumn">Name of the input column.</param>
-        /// <param name="outputColumn">Name of the output column.</param>
+        /// <param name="outputColumn">Name of the output column. Column is a vector of type double and size 3.
+        /// The vector contains Alert, Raw Score, P-Value as first three values.</param>
         /// <param name="confidence">The confidence for spike detection in the range [0, 100].</param>
         /// <param name="pvalueHistoryLength">The size of the sliding window for computing the p-value.</param>
         /// <param name="trainingWindowSize">The number of points from the beginning of the sequence used for training.</param>
@@ -259,7 +260,7 @@ namespace Microsoft.ML.Runtime.TimeSeriesProcessing
             var metadata = new List<SchemaShape.Column>() {
                 new SchemaShape.Column(MetadataUtils.Kinds.SlotNames, SchemaShape.Column.VectorKind.Vector, TextType.Instance, false)
             };
-            var resultDic = inputSchema.Columns.ToDictionary(x => x.Name);
+            var resultDic = inputSchema.ToDictionary(x => x.Name);
             resultDic[_args.Name] = new SchemaShape.Column(
                 _args.Name, SchemaShape.Column.VectorKind.Vector, NumberType.R8, false, new SchemaShape(metadata));
 
