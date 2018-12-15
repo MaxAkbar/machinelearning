@@ -130,11 +130,8 @@ namespace Microsoft.ML.Runtime.Training
         protected TTransformer TrainTransformer(IDataView trainSet,
             IDataView validationSet = null, IPredictor initPredictor = null)
         {
-            var cachedTrain = Info.WantCaching ? new CacheDataView(Host, trainSet, prefetch: null) : trainSet;
-            var cachedValid = Info.WantCaching && validationSet != null ? new CacheDataView(Host, validationSet, prefetch: null) : validationSet;
-
-            var trainRoleMapped = MakeRoles(cachedTrain);
-            var validRoleMapped = validationSet == null ? null : MakeRoles(cachedValid);
+            var trainRoleMapped = MakeRoles(trainSet);
+            var validRoleMapped = validationSet == null ? null : MakeRoles(validationSet);
 
             var pred = TrainModelCore(new TrainContext(trainRoleMapped, validRoleMapped, null, initPredictor));
             return MakeTransformer(pred, trainSet.Schema);
@@ -145,7 +142,7 @@ namespace Microsoft.ML.Runtime.Training
 
         protected abstract TTransformer MakeTransformer(TModel model, Schema trainSchema);
 
-        protected virtual RoleMappedData MakeRoles(IDataView data) =>
+        private protected virtual RoleMappedData MakeRoles(IDataView data) =>
             new RoleMappedData(data, label: LabelColumn.Name, feature: FeatureColumn.Name, weight: WeightColumn.Name);
 
         IPredictor ITrainer.Train(TrainContext context) => ((ITrainer<TModel>)this).Train(context);
@@ -175,7 +172,7 @@ namespace Microsoft.ML.Runtime.Training
             GroupIdColumn = groupId;
         }
 
-        protected override RoleMappedData MakeRoles(IDataView data) =>
+        private protected override RoleMappedData MakeRoles(IDataView data) =>
             new RoleMappedData(data, label: LabelColumn.Name, feature: FeatureColumn.Name, group: GroupIdColumn.Name, weight: WeightColumn.Name);
 
     }
