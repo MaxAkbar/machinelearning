@@ -230,7 +230,7 @@ namespace Microsoft.ML.Tests.Scenarios.Api.CookbookSamples
             // Make the prediction function object. Note that, on average, this call takes around 200x longer
             // than one prediction, so you might want to cache and reuse the prediction function, instead of
             // creating one per prediction.
-            var predictionFunc = model.MakePredictionFunction<IrisInput, IrisPrediction>(mlContext);
+            var predictionFunc = model.CreatePredictionEngine<IrisInput, IrisPrediction>(mlContext);
 
             // Obtain the prediction. Remember that 'Predict' is not reentrant. If you want to use multiple threads
             // for simultaneous prediction, make sure each thread is using its own PredictionFunction.
@@ -271,7 +271,7 @@ namespace Microsoft.ML.Tests.Scenarios.Api.CookbookSamples
             var trainData = reader.Read(dataPath);
 
             // This is the predictor ('weights collection') that we will train.
-            MulticlassLogisticRegressionPredictor predictor = null;
+            MulticlassLogisticRegressionModelParameters predictor = null;
             // And these are the normalizer scales that we will learn.
             ImmutableArray<float> normScales;
             // Build the training pipeline.

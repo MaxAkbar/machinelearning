@@ -176,6 +176,7 @@ namespace Microsoft.ML.Runtime.Data
 
             public Schema InputSchema => InputRoleMappedSchema.Schema;
             public Schema OutputSchema { get; }
+            private Schema.Column FeatureColumn => InputRoleMappedSchema.Feature.Value;
 
             public ISchemaBindableMapper Bindable => _owner;
 
@@ -185,7 +186,7 @@ namespace Microsoft.ML.Runtime.Data
                 Contracts.AssertValue(ectx);
                 ectx.AssertValue(owner);
                 ectx.AssertValue(schema);
-                ectx.AssertValue(schema.Feature);
+                ectx.Assert(schema.Feature.HasValue);
 
                 _ectx = ectx;
 
@@ -229,7 +230,7 @@ namespace Microsoft.ML.Runtime.Data
                 if (!treeValueActive && !leafIdActive && !pathIdActive)
                     return delegates;
 
-                var state = new State(_ectx, input, _owner._ensemble, _owner._totalLeafCount, InputRoleMappedSchema.Feature.Index);
+                var state = new State(_ectx, input, _owner._ensemble, _owner._totalLeafCount, FeatureColumn.Index);
 
                 // Get the tree value getter.
                 if (treeValueActive)
@@ -391,15 +392,15 @@ namespace Microsoft.ML.Runtime.Data
 
             public IEnumerable<KeyValuePair<RoleMappedSchema.ColumnRole, string>> GetInputColumnRoles()
             {
-                yield return RoleMappedSchema.ColumnRole.Feature.Bind(InputRoleMappedSchema.Feature.Name);
+                yield return RoleMappedSchema.ColumnRole.Feature.Bind(FeatureColumn.Name);
             }
 
             public Func<int, bool> GetDependencies(Func<int, bool> predicate)
             {
-                for (int i = 0; i < OutputSchema.ColumnCount; i++)
+                for (int i = 0; i < OutputSchema.Count; i++)
                 {
                     if (predicate(i))
-                        return col => col == InputRoleMappedSchema.Feature.Index;
+                        return col => col == FeatureColumn.Index;
                 }
                 return col => false;
             }
@@ -525,7 +526,7 @@ namespace Microsoft.ML.Runtime.Data
             dst = editor.Commit();
         }
 
-        public ISchemaBoundMapper Bind(IHostEnvironment env, RoleMappedSchema schema)
+        ISchemaBoundMapper ISchemaBindableMapper.Bind(IHostEnvironment env, RoleMappedSchema schema)
         {
             Contracts.AssertValue(env);
             env.AssertValue(schema);
@@ -639,6 +640,7 @@ namespace Microsoft.ML.Runtime.Data
 
                     ch.Trace("Creating scorer");
                     var data = TrainAndScoreTransformer.CreateDataFromArgs(ch, input, args);
+                    Contracts.Assert(data.Schema.Feature.HasValue);
 
                     // Make sure that the given predictor has the correct number of input features.
                     if (predictor is CalibratedPredictorBase)
@@ -647,14 +649,14 @@ namespace Microsoft.ML.Runtime.Data
                     // be non-null.
                     var vm = predictor as IValueMapper;
                     ch.CheckUserArg(vm != null, nameof(args.TrainedModelFile), "Predictor in model file does not have compatible type");
-                    if (vm.InputType.VectorSize != data.Schema.Feature.Type.VectorSize)
+                    if (vm.InputType.VectorSize != data.Schema.Feature.Value.Type.VectorSize)
                     {
                         throw ch.ExceptUserArg(nameof(args.TrainedModelFile),
                             "Predictor in model file expects {0} features, but data has {1} features",
-                            vm.InputType.VectorSize, data.Schema.Feature.Type.VectorSize);
+                            vm.InputType.VectorSize, data.Schema.Feature.Value.Type.VectorSize);
                     }
 
-                    var bindable = new TreeEnsembleFeaturizerBindableMapper(env, scorerArgs, predictor);
+                    ISchemaBindableMapper bindable = new TreeEnsembleFeaturizerBindableMapper(env, scorerArgs, predictor);
                     var bound = bindable.Bind(env, data.Schema);
                     xf = new GenericScorer(env, scorerArgs, input, bound, data.Schema);
                 }
@@ -702,6 +704,7 @@ namespace Microsoft.ML.Runtime.Data
                 RoleMappedData data = null;
                 args.PredictorModel.PrepareData(env, input, out data, out var predictor2);
                 ch.AssertValue(data);
+                ch.Assert(data.Schema.Feature.HasValue);
                 ch.Assert(predictor == predictor2);
 
                 // Make sure that the given predictor has the correct number of input features.
@@ -711,14 +714,14 @@ namespace Microsoft.ML.Runtime.Data
                 // be non-null.
                 var vm = predictor as IValueMapper;
                 ch.CheckUserArg(vm != null, nameof(args.PredictorModel), "Predictor does not have compatible type");
-                if (data != null && vm.InputType.VectorSize != data.Schema.Feature.Type.VectorSize)
+                if (data != null && vm.InputType.VectorSize != data.Schema.Feature.Value.Type.VectorSize)
                 {
                     throw ch.ExceptUserArg(nameof(args.PredictorModel),
                         "Predictor expects {0} features, but data has {1} features",
-                        vm.InputType.VectorSize, data.Schema.Feature.Type.VectorSize);
+                        vm.InputType.VectorSize, data.Schema.Feature.Value.Type.VectorSize);
                 }
 
-                var bindable = new TreeEnsembleFeaturizerBindableMapper(env, scorerArgs, predictor);
+                ISchemaBindableMapper bindable = new TreeEnsembleFeaturizerBindableMapper(env, scorerArgs, predictor);
                 var bound = bindable.Bind(env, data.Schema);
                return new GenericScorer(env, scorerArgs, data.Data, bound, data.Schema);
             }
@@ -780,7 +783,7 @@ namespace Microsoft.ML.Runtime.Data
             int col;
             if (!input.Schema.TryGetColumnIndex(labelName, out col))
                 throw ch.Except("Label column '{0}' not found.", labelName);
-            ColumnType labelType = input.Schema.GetColumnType(col);
+            ColumnType labelType = input.Schema[col].Type;
             if (!labelType.IsKey)
             {
                 if (labelPermutationSeed != 0)

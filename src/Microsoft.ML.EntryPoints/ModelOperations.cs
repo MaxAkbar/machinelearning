@@ -6,7 +6,6 @@ using Microsoft.ML.Runtime;
 using Microsoft.ML.Runtime.CommandLine;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.Learners;
 using Microsoft.ML.Trainers;
 using System.Linq;
 
@@ -154,7 +153,7 @@ namespace Microsoft.ML.Runtime.EntryPoints
                 return new PredictorModelOutput
                 {
                     PredictorModel = new PredictorModelImpl(env, data, input.TrainingData,
-                    OvaPredictor.Create(host, input.UseProbabilities,
+                    OvaModelParameters.Create(host, input.UseProbabilities,
                             input.ModelArray.Select(p => p.Predictor as IPredictorProducing<float>).ToArray()))
                 };
             }

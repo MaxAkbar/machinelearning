@@ -77,7 +77,7 @@ namespace Microsoft.ML.Transforms
 
             var outSchema = InternalSchemaDefinition.Create(typeof(TDst), outputSchemaDefinition);
             _addedSchema = outSchema;
-            _bindings = new ColumnBindings(Schema.Create(Source.Schema), DataViewConstructionUtils.GetSchemaColumns(outSchema));
+            _bindings = new ColumnBindings(Source.Schema, DataViewConstructionUtils.GetSchemaColumns(outSchema));
         }
 
         /// <summary>
@@ -93,7 +93,7 @@ namespace Microsoft.ML.Transforms
             _typedSource = TypedCursorable<TSrc>.Create(Host, newSource, false, transform._inputSchemaDefinition);
 
             _addedSchema = transform._addedSchema;
-            _bindings = new ColumnBindings(Schema.Create(newSource.Schema), DataViewConstructionUtils.GetSchemaColumns(_addedSchema));
+            _bindings = new ColumnBindings(newSource.Schema, DataViewConstructionUtils.GetSchemaColumns(_addedSchema));
         }
 
         public bool CanShuffle => false;
@@ -120,7 +120,7 @@ namespace Microsoft.ML.Transforms
             return new Cursor(this, input, predicate);
         }
 
-        public RowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> predicate, int n, Random rand = null)
+        public RowCursor[] GetRowCursorSet(Func<int, bool> predicate, int n, Random rand = null)
         {
             Contracts.CheckValue(predicate, nameof(predicate));
             Contracts.CheckParam(n >= 0, nameof(n));
@@ -128,7 +128,6 @@ namespace Microsoft.ML.Transforms
 
             // This transform is stateful, its contract is to allocate exactly one state object per cursor and call the filter function
             // on every row in sequence. Therefore, parallel cursoring is not possible.
-            consolidator = null;
             return new[] { GetRowCursor(predicate, rand) };
         }
 
@@ -236,7 +235,7 @@ namespace Microsoft.ML.Transforms
 
             public override bool IsColumnActive(int col)
             {
-                Contracts.CheckParam(0 <= col && col < Schema.ColumnCount, nameof(col));
+                Contracts.CheckParam(0 <= col && col < Schema.Count, nameof(col));
                 bool isSrc;
                 int iCol = _parent._bindings.MapColumnIndex(out isSrc, col);
                 if (isSrc)
@@ -246,7 +245,7 @@ namespace Microsoft.ML.Transforms
 
             public override ValueGetter<TValue> GetGetter<TValue>(int col)
             {
-                Contracts.CheckParam(0 <= col && col < Schema.ColumnCount, nameof(col));
+                Contracts.CheckParam(0 <= col && col < Schema.Count, nameof(col));
                 bool isSrc;
                 int iCol = _parent._bindings.MapColumnIndex(out isSrc, col);
                 return isSrc ?

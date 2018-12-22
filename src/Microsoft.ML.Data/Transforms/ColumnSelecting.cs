@@ -442,7 +442,7 @@ namespace Microsoft.ML.Transforms
         public Schema GetOutputSchema(Schema inputSchema)
         {
             _host.CheckValue(inputSchema, nameof(inputSchema));
-            if (!IgnoreMissing && !IsSchemaValid(inputSchema.GetColumns().Select(x => x.column.Name),
+            if (!IgnoreMissing && !IsSchemaValid(inputSchema.Select(x => x.Name),
                                                                 SelectColumns, out IEnumerable<string> invalidColumns))
             {
                 throw _host.ExceptSchemaMismatch(nameof(inputSchema), "input", string.Join(",", invalidColumns));
@@ -454,7 +454,7 @@ namespace Microsoft.ML.Transforms
         public IRowToRowMapper GetRowToRowMapper(Schema inputSchema)
         {
             _host.CheckValue(inputSchema, nameof(inputSchema));
-            if (!IgnoreMissing && !IsSchemaValid(inputSchema.GetColumns().Select(x => x.column.Name),
+            if (!IgnoreMissing && !IsSchemaValid(inputSchema.Select(x => x.Name),
                                                     SelectColumns, out IEnumerable<string> invalidColumns))
             {
                 throw _host.ExceptSchemaMismatch(nameof(inputSchema), "input", string.Join(",", invalidColumns));
@@ -468,7 +468,7 @@ namespace Microsoft.ML.Transforms
         public IDataView Transform(IDataView input)
         {
             _host.CheckValue(input, nameof(input));
-            if (!IgnoreMissing && !IsSchemaValid(input.Schema.GetColumns().Select(x => x.column.Name),
+            if (!IgnoreMissing && !IsSchemaValid(input.Schema.Select(x => x.Name),
                                                     SelectColumns, out IEnumerable<string> invalidColumns))
             {
                 throw _host.ExceptSchemaMismatch(nameof(input), "input", string.Join(",", invalidColumns));
@@ -511,7 +511,7 @@ namespace Microsoft.ML.Transforms
                 Schema inputSchema)
             {
                 var outputToInputMapping = new List<int>();
-                var columnCount = inputSchema.ColumnCount;
+                var columnCount = inputSchema.Count;
 
                 if (keepColumns)
                 {
@@ -523,9 +523,9 @@ namespace Microsoft.ML.Transforms
                     // column name-> list of column indices. This dictionary is used for
                     // building the final mapping.
                     var columnDict = new Dictionary<string, List<int>>();
-                    for (int colIdx = 0; colIdx < inputSchema.ColumnCount; ++colIdx)
+                    for (int colIdx = 0; colIdx < inputSchema.Count; ++colIdx)
                     {
-                        if (!keepHidden && inputSchema.IsHidden(colIdx))
+                        if (!keepHidden && inputSchema[colIdx].IsHidden)
                             continue;
 
                         var columnName = inputSchema[colIdx].Name;
@@ -559,7 +559,7 @@ namespace Microsoft.ML.Transforms
                     // given an input of ABC and dropping column B will result in AC.
                     // In drop mode, we drop all columns with the specified names and keep all the rest,
                     // ignoring the keepHidden argument.
-                    for(int colIdx = 0; colIdx < inputSchema.ColumnCount; colIdx++)
+                    for(int colIdx = 0; colIdx < inputSchema.Count; colIdx++)
                     {
                         if (selectedColumns.Contains(inputSchema[colIdx].Name))
                             continue;
@@ -635,29 +635,27 @@ namespace Microsoft.ML.Transforms
                 var inputRowCursor = Source.GetRowCursor(inputPred, rand);
 
                 // Build the active state for the output
-                var active = Utils.BuildArray(_mapper.OutputSchema.ColumnCount, needCol);
+                var active = Utils.BuildArray(_mapper.OutputSchema.Count, needCol);
                 return new Cursor(_host, _mapper, inputRowCursor, active);
             }
 
-            public RowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> needCol, int n, Random rand = null)
+            public RowCursor[] GetRowCursorSet(Func<int, bool> needCol, int n, Random rand = null)
             {
                 _host.CheckValue(needCol, nameof(needCol));
                 _host.CheckValueOrNull(rand);
 
                 // Build out the active state for the input
                 var inputPred = GetDependencies(needCol);
-                var inputs = Source.GetRowCursorSet(out consolidator, inputPred, n, rand);
+                var inputs = Source.GetRowCursorSet(inputPred, n, rand);
 
                 // Build out the acitve state for the output
-                var active = Utils.BuildArray(_mapper.OutputSchema.ColumnCount, needCol);
+                var active = Utils.BuildArray(_mapper.OutputSchema.Count, needCol);
                 _host.AssertNonEmpty(inputs);
 
                 // No need to split if this is given 1 input cursor.
                 var cursors = new RowCursor[inputs.Length];
                 for (int i = 0; i < inputs.Length; i++)
-                {
                     cursors[i] = new Cursor(_host, _mapper, inputs[i], active);
-                }
                 return cursors;
             }
 
@@ -665,8 +663,8 @@ namespace Microsoft.ML.Transforms
 
             public Func<int, bool> GetDependencies(Func<int, bool> activeOutput)
             {
-                var active = new bool[_mapper.InputSchema.ColumnCount];
-                var columnCount = _mapper.OutputSchema.ColumnCount;
+                var active = new bool[_mapper.InputSchema.Count];
+                var columnCount = _mapper.OutputSchema.Count;
                 for (int colIdx = 0; colIdx < columnCount; ++colIdx)
                 {
                     if (activeOutput(colIdx))

@@ -3,6 +3,7 @@
 // See the LICENSE file in the project root for more information.
 
 using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
 using Microsoft.ML.Runtime.Data;
 using Microsoft.ML.Runtime.EntryPoints;
 using Microsoft.ML.Runtime.Internal.Utilities;
@@ -170,7 +171,7 @@ namespace Microsoft.ML.Runtime.LightGBM
         private protected virtual void CheckDataValid(IChannel ch, RoleMappedData data)
         {
             data.CheckFeatureFloatVector();
-            ch.CheckParam(data.Schema.Label != null, nameof(data), "Need a label column");
+            ch.CheckParam(data.Schema.Label.HasValue, nameof(data), "Need a label column");
         }
 
         protected virtual void GetDefaultParameters(IChannel ch, int numRow, bool hasCategarical, int totalCats, bool hiddenMsg=false)
@@ -191,6 +192,9 @@ namespace Microsoft.ML.Runtime.LightGBM
                     ch.Info("Auto-tuning parameters: " + nameof(Args.MinDataPerLeaf) + " = " + minDataPerLeaf);
             }
         }
+
+        [BestFriend]
+        internal Dictionary<string, object> GetGbmParameters() => Options;
 
         private FloatLabelCursor.Factory CreateCursorFactory(RoleMappedData data)
         {
@@ -285,7 +289,7 @@ namespace Microsoft.ML.Runtime.LightGBM
                 trainData.Schema.Schema.TryGetColumnIndex(DefaultColumnNames.Features, out int featureIndex);
                 MetadataUtils.TryGetCategoricalFeatureIndices(trainData.Schema.Schema, featureIndex, out categoricalFeatures);
             }
-            var colType = trainData.Schema.Feature.Type;
+            var colType = trainData.Schema.Feature.Value.Type;
             int rawNumCol = colType.VectorSize;
             FeatureCount = rawNumCol;
             catMetaData.TotalCats = 0;
@@ -612,8 +616,16 @@ namespace Microsoft.ML.Runtime.LightGBM
                             int curNonZeroCnt = nonZeroCntPerColumn[i];
                             Utils.EnsureSize(ref sampleValuePerColumn[i], curNonZeroCnt + 1);
                             Utils.EnsureSize(ref sampleIndicesPerColumn[i], curNonZeroCnt + 1);
+                            // sampleValuePerColumn[i] is a vector whose j-th element is added when j-th non-zero value
+                            // at the i-th feature is found as scanning the training data.
+                            // In other words, sampleValuePerColumn[i][j] is the j-th non-zero i-th feature in the data set.
+                            // when we scan the data matrix example-by-example.
                             sampleValuePerColumn[i][curNonZeroCnt] = fv;
+                            // If the data set is dense, sampleValuePerColumn[i][j] would be the i-th feature at the j-th example.
+                            // If the data set is not dense, sampleValuePerColumn[i][j] would be the i-th feature at the
+                            // sampleIndicesPerColumn[i][j]-th example.
                             sampleIndicesPerColumn[i][curNonZeroCnt] = sampleIdx;
+                            // The number of non-zero values at the i-th feature is nonZeroCntPerColumn[i].
                             nonZeroCntPerColumn[i] = curNonZeroCnt + 1;
                         }
                     }
@@ -634,7 +646,9 @@ namespace Microsoft.ML.Runtime.LightGBM
                             nonZeroCntPerColumn[colIdx] = curNonZeroCnt + 1;
                         }
                     }
+                    // Actual row indexed sampled from the original data set
                     totalIdx += step;
+                    // Row index in the sub-sampled data created in this loop.
                     ++sampleIdx;
                     if (numSampleRow == sampleIdx || numRow == totalIdx)
                         break;

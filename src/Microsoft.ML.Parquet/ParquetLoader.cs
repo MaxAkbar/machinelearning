@@ -398,11 +398,10 @@ namespace Microsoft.ML.Runtime.Data
             return new Cursor(this, predicate, rand);
         }
 
-        public RowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> predicate, int n, Random rand = null)
+        public RowCursor[] GetRowCursorSet(Func<int, bool> predicate, int n, Random rand = null)
         {
             _host.CheckValue(predicate, nameof(predicate));
             _host.CheckValueOrNull(rand);
-            consolidator = null;
             return new RowCursor[] { GetRowCursor(predicate, rand) };
         }
 
@@ -427,7 +426,7 @@ namespace Microsoft.ML.Runtime.Data
             var saver = new BinarySaver(_host, saverArgs);
             using (var strm = new MemoryStream())
             {
-                var allColumns = Enumerable.Range(0, Schema.ColumnCount).ToArray();
+                var allColumns = Enumerable.Range(0, Schema.Count).ToArray();
                 saver.SaveData(strm, noRows, allColumns);
                 ctx.SaveBinaryStream(SchemaCtxName, w => w.WriteByteArray(strm.ToArray()));
             }
@@ -460,7 +459,7 @@ namespace Microsoft.ML.Runtime.Data
                 _rand = rand;
 
                 // Create Getter delegates
-                Utils.BuildSubsetMaps(Schema.ColumnCount, predicate, out _actives, out _colToActivesIndex);
+                Utils.BuildSubsetMaps(Schema.Count, predicate, out _actives, out _colToActivesIndex);
                 _readerOptions = new ReaderOptions
                 {
                     Count = _loader._columnChunkReadSize,

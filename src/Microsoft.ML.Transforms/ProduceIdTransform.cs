@@ -35,7 +35,7 @@ namespace Microsoft.ML.Transforms
 
         private sealed class Bindings : ColumnBindingsBase
         {
-            public Bindings(ISchema input, bool user, string name)
+            public Bindings(Schema input, bool user, string name)
                 : base(input, user, name)
             {
                 Contracts.Assert(InfoCount == 1);
@@ -47,7 +47,7 @@ namespace Microsoft.ML.Transforms
                 return NumberType.UG;
             }
 
-            public static Bindings Create(ModelLoadContext ctx, ISchema input)
+            public static Bindings Create(ModelLoadContext ctx, Schema input)
             {
                 Contracts.AssertValue(ctx);
                 Contracts.AssertValue(input);
@@ -72,7 +72,7 @@ namespace Microsoft.ML.Transforms
                 Contracts.AssertValue(predicate);
 
                 var active = GetActiveInput(predicate);
-                Contracts.Assert(active.Length == Input.ColumnCount);
+                Contracts.Assert(active.Length == Input.Count);
                 return col => 0 <= col && col < active.Length && active[col];
             }
         }
@@ -148,13 +148,13 @@ namespace Microsoft.ML.Transforms
             return new Cursor(Host, _bindings, input, active);
         }
 
-        public override RowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator, Func<int, bool> predicate, int n, Random rand = null)
+        public override RowCursor[] GetRowCursorSet(Func<int, bool> predicate, int n, Random rand = null)
         {
             Host.CheckValue(predicate, nameof(predicate));
             Host.CheckValueOrNull(rand);
 
             var inputPred = _bindings.GetDependencies(predicate);
-            RowCursor[] cursors = Source.GetRowCursorSet(out consolidator, inputPred, n, rand);
+            RowCursor[] cursors = Source.GetRowCursorSet(inputPred, n, rand);
             bool active = predicate(_bindings.MapIinfoToCol(0));
             for (int c = 0; c < cursors.Length; ++c)
                 cursors[c] = new Cursor(Host, _bindings, cursors[c], active);

@@ -194,16 +194,14 @@ namespace Microsoft.ML.Transforms
             Host.AssertValueOrNull(rand);
 
             var input = Source.GetRowCursor(predicate);
-            var activeColumns = Utils.BuildArray(OutputSchema.ColumnCount, predicate);
+            var activeColumns = Utils.BuildArray(OutputSchema.Count, predicate);
             return new Cursor(Host, input, OutputSchema, activeColumns, _skip, _take);
         }
 
-        public override RowCursor[] GetRowCursorSet(out IRowCursorConsolidator consolidator,
-            Func<int, bool> predicate, int n, Random rand = null)
+        public override RowCursor[] GetRowCursorSet(Func<int, bool> predicate, int n, Random rand = null)
         {
             Host.CheckValue(predicate, nameof(predicate));
             Host.CheckValueOrNull(rand);
-            consolidator = null;
             return new RowCursor[] { GetRowCursorCore(predicate) };
         }
 

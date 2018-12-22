@@ -56,7 +56,7 @@ namespace Microsoft.ML.Runtime.FactorizationMachine
 
     internal sealed class FieldAwareFactorizationMachineScalarRowMapper : ISchemaBoundRowMapper
     {
-        private readonly FieldAwareFactorizationMachinePredictor _pred;
+        private readonly FieldAwareFactorizationMachineModelParameters _pred;
 
         public RoleMappedSchema InputRoleMappedSchema { get; }
 
@@ -66,18 +66,18 @@ namespace Microsoft.ML.Runtime.FactorizationMachine
 
         public ISchemaBindableMapper Bindable => _pred;
 
-        private readonly ColumnInfo[] _columns;
+        private readonly Schema.Column[] _columns;
         private readonly List<int> _inputColumnIndexes;
         private readonly IHostEnvironment _env;
 
         public FieldAwareFactorizationMachineScalarRowMapper(IHostEnvironment env, RoleMappedSchema schema,
-            Schema outputSchema, FieldAwareFactorizationMachinePredictor pred)
+            Schema outputSchema, FieldAwareFactorizationMachineModelParameters pred)
         {
             Contracts.AssertValue(env);
             Contracts.AssertValue(schema);
-            Contracts.CheckParam(outputSchema.ColumnCount == 2, nameof(outputSchema));
-            Contracts.CheckParam(outputSchema.GetColumnType(0).IsNumber, nameof(outputSchema));
-            Contracts.CheckParam(outputSchema.GetColumnType(1).IsNumber, nameof(outputSchema));
+            Contracts.CheckParam(outputSchema.Count == 2, nameof(outputSchema));
+            Contracts.CheckParam(outputSchema[0].Type.IsNumber, nameof(outputSchema));
+            Contracts.CheckParam(outputSchema[1].Type.IsNumber, nameof(outputSchema));
             Contracts.AssertValue(pred);
 
             _env = env;
@@ -135,7 +135,7 @@ namespace Microsoft.ML.Runtime.FactorizationMachine
 
         public Func<int, bool> GetDependencies(Func<int, bool> predicate)
         {
-            if (Enumerable.Range(0, OutputSchema.ColumnCount).Any(predicate))
+            if (Enumerable.Range(0, OutputSchema.Count).Any(predicate))
                 return index => _inputColumnIndexes.Any(c => c == index);
             else
                 return index => false;

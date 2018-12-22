@@ -40,7 +40,8 @@ namespace Microsoft.ML.Runtime.Data
     /// <summary>
     /// Interface to define an aggregate function over values
     /// </summary>
-    public interface IColumnAggregator<T>
+    [BestFriend]
+    internal interface IColumnAggregator<T>
     {
         /// <summary>
         /// Updates the aggregate function with a value
@@ -53,6 +54,7 @@ namespace Microsoft.ML.Runtime.Data
         void Finish();
     }
 
+    [BestFriend]
     internal interface IColumnFunction : ICanSaveModel
     {
         Delegate GetGetter(Row input, int icol);
@@ -66,27 +68,6 @@ namespace Microsoft.ML.Runtime.Data
         bool OnnxInfo(OnnxContext ctx, OnnxNode nodeProtoWrapper, int featureCount);
 
         NormalizingTransformer.NormalizerModelParametersBase GetNormalizerModelParams();
-    }
-
-    public static class NormalizeUtils
-    {
-        /// <summary>
-        /// Returns whether the feature column in the schema is indicated to be normalized. If the features column is not
-        /// specified on the schema, then this will return <c>null</c>.
-        /// </summary>
-        /// <param name="schema">The role-mapped schema to query</param>
-        /// <returns>Returns null if <paramref name="schema"/> does not have <see cref="RoleMappedSchema.Feature"/>
-        /// defined, and otherwise returns a Boolean value as returned from <see cref="MetadataUtils.IsNormalized(Schema, int)"/>
-        /// on that feature column</returns>
-        /// <seealso cref="MetadataUtils.IsNormalized(Schema, int)"/>
-        public static bool? FeaturesAreNormalized(this RoleMappedSchema schema)
-        {
-            // REVIEW: The role mapped data has the ability to have multiple columns fill the role of features, which is
-            // useful in some trainers that are nonetheless parameteric and can therefore benefit from normalization.
-            Contracts.CheckValue(schema, nameof(schema));
-            var featInfo = schema.Feature;
-            return featInfo == null ? default(bool?) : schema.Schema.IsNormalized(featInfo.Index);
-        }
     }
 
     /// <summary>
@@ -154,7 +135,7 @@ namespace Microsoft.ML.Runtime.Data
             {
                 if (!schema.TryGetColumnIndex(column.Source, out int col))
                     throw env.ExceptUserArg(nameof(input.Column), $"Column '{column.Source}' does not exist.");
-                if (!schema.IsNormalized(col))
+                if (!schema[col].IsNormalized())
                     columnsToNormalize.Add(column);
             }
 

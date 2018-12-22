@@ -1009,6 +1009,52 @@ namespace Microsoft.ML.Runtime.RunTests
             Done();
         }
 
+        [TestCategory("DataPipeSerialization")]
+        [Fact]
+        public void SavePipeTrainAndScoreFccFastTree()
+        {
+            RunMTAThread(() => TestCore(null, false,
+                new[]
+                {
+                    "loader=Text",
+                    "xf=TrainScore{tr=FT scorer=fcc{top=4 bottom=2 str+}}",
+                    "xf=Copy{col=ContributionsStr:FeatureContributions}",
+                    "xf=TrainScore{tr=FT scorer=fcc{top=3 bottom=3}}"
+                }, digitsOfPrecision: 6));
+
+            Done();
+        }
+
+        [TestCategory("DataPipeSerialization")]
+        [Fact]
+        public void SavePipeTrainAndScoreFccTransformStr()
+        {
+            TestCore(null, false,
+                new[]
+                {
+                    "loader=Text xf=TrainScore{tr=AP{shuf-} scorer=fcc{str+}}"
+                }, digitsOfPrecision: 5);
+
+            Done();
+        }
+
+        [Fact]
+        public void SavePipeLda()
+        {
+            string pathData = DeleteOutputPath("SavePipe", "Lda.txt");
+            File.WriteAllLines(pathData, new string[] {
+                "1\t0\t0",
+                "0\t1\t0",
+                "0\t0\t"
+            });
+            TestCore(pathData, false,
+                new[] {
+                    "loader=Text{col=F1V:Num:0-2}",
+                    "xf=Lda{col={name=Result src=F1V numtopic=3 alphasum=3 ns=3 reset=+ t=1} summary=+}",
+                }, forceDense: true);
+            Done();
+        }
+
         [Fact]
         public void TestHashTransformFloat()
         {
