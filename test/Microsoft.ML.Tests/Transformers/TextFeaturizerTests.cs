@@ -1,19 +1,19 @@
-﻿// Licensed to the .NET Foundation under one or more agreements.
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Data.IO;
-using Microsoft.ML.Runtime.RunTests;
-using Microsoft.ML.Runtime.Tools;
-using Microsoft.ML.StaticPipe;
-using Microsoft.ML.Transforms;
-using Microsoft.ML.Transforms.Categorical;
-using Microsoft.ML.Transforms.Conversions;
-using Microsoft.ML.Transforms.Text;
 using System;
 using System.IO;
+using Microsoft.ML;
+using Microsoft.ML.Data;
+using Microsoft.ML.Data.IO;
+using Microsoft.ML.Model;
+using Microsoft.ML.RunTests;
+using Microsoft.ML.StaticPipe;
+using Microsoft.ML.Tools;
+using Microsoft.ML.Transforms;
+using Microsoft.ML.Transforms.Conversions;
+using Microsoft.ML.Transforms.Text;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -30,12 +30,12 @@ namespace Microsoft.ML.Tests.Transformers
         public void TextFeaturizerWorkout()
         {
             string sentimentDataPath = GetDataPath("wikipedia-detox-250-line-data.tsv");
-            var data = TextLoader.CreateReader(Env, ctx => (
+            var data = TextLoaderStatic.CreateReader(Env, ctx => (
                     label: ctx.LoadBool(0),
                     text: ctx.LoadText(1)), hasHeader: true)
                 .Read(sentimentDataPath);
 
-            var invalidData = TextLoader.CreateReader(Env, ctx => (
+            var invalidData = TextLoaderStatic.CreateReader(Env, ctx => (
                     label: ctx.LoadBool(0),
                     text: ctx.LoadFloat(1)), hasHeader: true)
                 .Read(sentimentDataPath)
@@ -65,12 +65,12 @@ namespace Microsoft.ML.Tests.Transformers
         public void TextTokenizationWorkout()
         {
             string sentimentDataPath = GetDataPath("wikipedia-detox-250-line-data.tsv");
-            var data = TextLoader.CreateReader(Env, ctx => (
+            var data = TextLoaderStatic.CreateReader(Env, ctx => (
                     label: ctx.LoadBool(0),
                     text: ctx.LoadText(1)), hasHeader: true)
                 .Read(sentimentDataPath);
 
-            var invalidData = TextLoader.CreateReader(Env, ctx => (
+            var invalidData = TextLoaderStatic.CreateReader(Env, ctx => (
                     label: ctx.LoadBool(0),
                     text: ctx.LoadFloat(1)), hasHeader: true)
                 .Read(sentimentDataPath);
@@ -99,7 +99,7 @@ namespace Microsoft.ML.Tests.Transformers
         public void TokenizeWithSeparators()
         {
             string dataPath = GetDataPath("wikipedia-detox-250-line-data.tsv");
-            var data = TextLoader.CreateReader(Env, ctx => (
+            var data = TextLoaderStatic.CreateReader(Env, ctx => (
                     label: ctx.LoadBool(0),
                     text: ctx.LoadText(1)), hasHeader: true)
                 .Read(dataPath).AsDynamic;
@@ -136,12 +136,12 @@ namespace Microsoft.ML.Tests.Transformers
         public void TextNormalizationAndStopwordRemoverWorkout()
         {
             string sentimentDataPath = GetDataPath("wikipedia-detox-250-line-data.tsv");
-            var data = TextLoader.CreateReader(Env, ctx => (
+            var data = TextLoaderStatic.CreateReader(Env, ctx => (
                     label: ctx.LoadBool(0),
                     text: ctx.LoadText(1)), hasHeader: true)
                 .Read(sentimentDataPath);
 
-            var invalidData = TextLoader.CreateReader(Env, ctx => (
+            var invalidData = TextLoaderStatic.CreateReader(Env, ctx => (
                     label: ctx.LoadBool(0),
                     text: ctx.LoadFloat(1)), hasHeader: true)
                 .Read(sentimentDataPath);
@@ -173,7 +173,7 @@ namespace Microsoft.ML.Tests.Transformers
             string sentimentDataPath = GetDataPath("wikipedia-detox-250-line-data.tsv");
             var data = TextLoader.Create(ML, new TextLoader.Arguments()
             {
-                Column = new []
+                Column = new[]
                 {
                     new TextLoader.Column("Text", DataKind.TX, 1)
                 }
@@ -202,18 +202,18 @@ namespace Microsoft.ML.Tests.Transformers
         public void WordBagWorkout()
         {
             string sentimentDataPath = GetDataPath("wikipedia-detox-250-line-data.tsv");
-            var data = TextLoader.CreateReader(Env, ctx => (
+            var data = TextLoaderStatic.CreateReader(Env, ctx => (
                     label: ctx.LoadBool(0),
                     text: ctx.LoadText(1)), hasHeader: true)
                 .Read(sentimentDataPath);
 
-            var invalidData = TextLoader.CreateReader(Env, ctx => (
+            var invalidData = TextLoaderStatic.CreateReader(Env, ctx => (
                     label: ctx.LoadBool(0),
                     text: ctx.LoadFloat(1)), hasHeader: true)
                 .Read(sentimentDataPath);
 
             var est = new WordBagEstimator(Env, "text", "bag_of_words").
-                Append(new WordHashBagEstimator(Env, "text", "bag_of_wordshash", invertHash:-1));
+                Append(new WordHashBagEstimator(Env, "text", "bag_of_wordshash", invertHash: -1));
 
             // The following call fails because of the following issue
             // https://github.com/dotnet/machinelearning/issues/969
@@ -238,12 +238,12 @@ namespace Microsoft.ML.Tests.Transformers
         public void NgramWorkout()
         {
             string sentimentDataPath = GetDataPath("wikipedia-detox-250-line-data.tsv");
-            var data = TextLoader.CreateReader(Env, ctx => (
+            var data = TextLoaderStatic.CreateReader(Env, ctx => (
                     label: ctx.LoadBool(0),
                     text: ctx.LoadText(1)), hasHeader: true)
                 .Read(sentimentDataPath);
 
-            var invalidData = TextLoader.CreateReader(Env, ctx => (
+            var invalidData = TextLoaderStatic.CreateReader(Env, ctx => (
                     label: ctx.LoadBool(0),
                     text: ctx.LoadFloat(1)), hasHeader: true)
                 .Read(sentimentDataPath);
@@ -271,16 +271,33 @@ namespace Microsoft.ML.Tests.Transformers
         }
 
         [Fact]
+        void TestNgramCompatColumns()
+        {
+            string dropModelPath = GetDataPath("backcompat/ngram.zip");
+            string sentimentDataPath = GetDataPath("wikipedia-detox-250-line-data.tsv");
+            var data = TextLoaderStatic.CreateReader(ML, ctx => (
+                    Sentiment: ctx.LoadBool(0),
+                    SentimentText: ctx.LoadText(1)), hasHeader: true)
+                .Read(sentimentDataPath);
+            using (FileStream fs = File.OpenRead(dropModelPath))
+            {
+                var result = ModelFileUtils.LoadTransforms(Env, data.AsDynamic, fs);
+                var featureColumn = result.Schema.GetColumnOrNull("Features");
+                Assert.NotNull(featureColumn);
+            }
+        }
+
+        [Fact]
         public void LdaWorkout()
         {
             IHostEnvironment env = new MLContext(seed: 42, conc: 1);
             string sentimentDataPath = GetDataPath("wikipedia-detox-250-line-data.tsv");
-            var data = TextLoader.CreateReader(env, ctx => (
+            var data = TextLoaderStatic.CreateReader(env, ctx => (
                     label: ctx.LoadBool(0),
                     text: ctx.LoadText(1)), hasHeader: true)
                 .Read(sentimentDataPath);
 
-            var invalidData = TextLoader.CreateReader(env, ctx => (
+            var invalidData = TextLoaderStatic.CreateReader(env, ctx => (
                     label: ctx.LoadBool(0),
                     text: ctx.LoadFloat(1)), hasHeader: true)
                 .Read(sentimentDataPath);

@@ -2,18 +2,16 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Data.IO;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.TestFramework;
-using Microsoft.ML.Trainers.Online;
-using Microsoft.ML.Transforms;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Microsoft.ML.Data;
+using Microsoft.ML.Data.IO;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.TestFramework;
+using Microsoft.ML.Trainers.Online;
+using Microsoft.ML.Transforms;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -233,7 +231,7 @@ namespace Microsoft.ML.Tests.Scenarios.Api
 
             Assert.True(idv.Schema[1].Metadata.Schema.Count == 3);
             Assert.True(idv.Schema[1].Metadata.Schema[0].Name == kindStringArray);
-            Assert.True(idv.Schema[1].Metadata.Schema[0].Type.IsVector && idv.Schema[1].Metadata.Schema[0].Type.ItemType.IsText);
+            Assert.True(idv.Schema[1].Metadata.Schema[0].Type.IsVector && idv.Schema[1].Metadata.Schema[0].Type.ItemType is TextType);
             Assert.Throws<ArgumentOutOfRangeException>(() => idv.Schema[1].Metadata.Schema[kindFloat]);
 
             float retrievedFloat = 0;

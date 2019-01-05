@@ -2,15 +2,13 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Data.IO;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
 using System;
 using System.IO;
 using System.Text;
+using Microsoft.ML.Data;
+using Microsoft.ML.Data.IO;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
 
 namespace Microsoft.ML.Transforms.Conversions
 {
@@ -41,7 +39,7 @@ namespace Microsoft.ML.Transforms.Conversions
             public static Builder Create(ColumnType type, SortOrder sortOrder)
             {
                 Contracts.AssertValue(type);
-                Contracts.Assert(type.IsVector || type.IsPrimitive);
+                Contracts.Assert(type.IsVector || type is PrimitiveType);
                 // Right now we have only two. This "public" interface externally looks like it might
                 // accept any value, but currently the internal implementations of Builder are split
                 // along this being a purely binary option, for now (though this can easily change
@@ -51,7 +49,7 @@ namespace Microsoft.ML.Transforms.Conversions
 
                 PrimitiveType itemType = type.ItemType as PrimitiveType;
                 Contracts.AssertValue(itemType);
-                if (itemType.IsText)
+                if (itemType is TextType)
                     return new TextImpl(sorted);
                 return Utils.MarshalInvoke(CreateCore<int>, itemType.RawType, itemType, sorted);
             }
@@ -66,7 +64,7 @@ namespace Microsoft.ML.Transforms.Conversions
                 // of building our term dictionary. For the other types (practically, only the UX types),
                 // we should ignore nothing.
                 InPredicate<T> mapsToMissing;
-                if (!Runtime.Data.Conversion.Conversions.Instance.TryGetIsNAPredicate(type, out mapsToMissing))
+                if (!Data.Conversion.Conversions.Instance.TryGetIsNAPredicate(type, out mapsToMissing))
                     mapsToMissing = (in T val) => false;
                 return new Impl<T>(type, mapsToMissing, sorted);
             }
@@ -206,7 +204,7 @@ namespace Microsoft.ML.Transforms.Conversions
             public override void ParseAddTermArg(ref ReadOnlyMemory<char> terms, IChannel ch)
             {
                 T val;
-                var tryParse = Runtime.Data.Conversion.Conversions.Instance.GetTryParseConversion<T>(ItemType);
+                var tryParse = Data.Conversion.Conversions.Instance.GetTryParseConversion<T>(ItemType);
                 for (bool more = true; more;)
                 {
                     ReadOnlyMemory<char> term;
@@ -232,7 +230,7 @@ namespace Microsoft.ML.Transforms.Conversions
             public override void ParseAddTermArg(string[] terms, IChannel ch)
             {
                 T val;
-                var tryParse = Runtime.Data.Conversion.Conversions.Instance.GetTryParseConversion<T>(ItemType);
+                var tryParse = Data.Conversion.Conversions.Instance.GetTryParseConversion<T>(ItemType);
                 foreach (var sterm in terms)
                 {
                     ReadOnlyMemory<char> term = sterm.AsMemory();
@@ -291,7 +289,7 @@ namespace Microsoft.ML.Transforms.Conversions
                 var type = schema[col].Type;
                 Contracts.Assert(autoConvert || bldr.ItemType == type.ItemType);
                 // Auto conversion should only be possible when the type is text.
-                Contracts.Assert(type.IsText || !autoConvert);
+                Contracts.Assert(type is TextType || !autoConvert);
                 if (type.IsVector)
                     return Utils.MarshalInvoke(CreateVec<int>, bldr.ItemType.RawType, row, col, count, bldr);
                 return Utils.MarshalInvoke(CreateOne<int>, bldr.ItemType.RawType, row, col, autoConvert, count, bldr);
@@ -529,7 +527,7 @@ namespace Microsoft.ML.Transforms.Conversions
                         IValueCodec codec;
                         if (!codecFactory.TryReadCodec(ctx.Reader.BaseStream, out codec))
                             throw ectx.Except("Unrecognized codec read");
-                        ectx.CheckDecode(codec.Type.IsPrimitive);
+                        ectx.CheckDecode(codec.Type is PrimitiveType);
                         int count = ctx.Reader.ReadInt32();
                         ectx.CheckDecode(count >= 0);
                         return Utils.MarshalInvoke(LoadCodecCore<int>, codec.Type.RawType, ctx, ectx, codec, count);
@@ -546,7 +544,7 @@ namespace Microsoft.ML.Transforms.Conversions
                 ectx.AssertValue(ctx);
                 ectx.AssertValue(codec);
                 ectx.Assert(codec is IValueCodec<T>);
-                ectx.Assert(codec.Type.IsPrimitive);
+                ectx.Assert(codec.Type is PrimitiveType);
                 ectx.Assert(count >= 0);
 
                 IValueCodec<T> codecT = (IValueCodec<T>)codec;
@@ -701,7 +699,7 @@ namespace Microsoft.ML.Transforms.Conversions
                         throw host.Except("We do not know how to serialize terms of type '{0}'", ItemType);
                     ctx.Writer.Write((byte)MapType.Codec);
                     host.Assert(codec.Type.Equals(ItemType));
-                    host.Assert(codec.Type.IsPrimitive);
+                    host.Assert(codec.Type is PrimitiveType);
                     codecFactory.WriteCodec(ctx.Writer.BaseStream, codec);
                     IValueCodec<T> codecT = (IValueCodec<T>)codec;
                     ctx.Writer.Write(_values.Count);
@@ -747,7 +745,7 @@ namespace Microsoft.ML.Transforms.Conversions
                 {
                     writer.WriteLine("# Number of terms of type '{0}' = {1}", ItemType, Count);
                     StringBuilder sb = null;
-                    var stringMapper = Runtime.Data.Conversion.Conversions.Instance.GetStringConversion<T>(ItemType);
+                    var stringMapper = Data.Conversion.Conversions.Instance.GetStringConversion<T>(ItemType);
                     for (int i = 0; i < _values.Count; ++i)
                     {
                         T val = _values.GetItem(i);
@@ -1043,9 +1041,9 @@ namespace Microsoft.ML.Transforms.Conversions
                 {
                     if (TypedMap.Count == 0)
                         return;
-                    if (IsTextMetadata && !TypedMap.ItemType.IsText)
+                    if (IsTextMetadata && !(TypedMap.ItemType is TextType))
                     {
-                        var conv = Runtime.Data.Conversion.Conversions.Instance;
+                        var conv = Data.Conversion.Conversions.Instance;
                         var stringMapper = conv.GetStringConversion<T>(TypedMap.ItemType);
 
                         ValueGetter<VBuffer<ReadOnlyMemory<char>>> getter =
@@ -1105,7 +1103,7 @@ namespace Microsoft.ML.Transforms.Conversions
                     var srcType = TypedMap.ItemType as KeyType;
                     _host.AssertValue(srcType);
                     var dstType = new KeyType(DataKind.U4, srcType.Min, srcType.Count);
-                    var convInst = Runtime.Data.Conversion.Conversions.Instance;
+                    var convInst = Data.Conversion.Conversions.Instance;
                     ValueMapper<T, uint> conv;
                     bool identity;
                     // If we can't convert this type to U4, don't try to pass along the metadata.
@@ -1135,7 +1133,7 @@ namespace Microsoft.ML.Transforms.Conversions
                             dst = editor.Commit();
                         };
 
-                    if (IsTextMetadata && !srcMetaType.IsText)
+                    if (IsTextMetadata && !(srcMetaType is TextType))
                     {
                         var stringMapper = convInst.GetStringConversion<TMeta>(srcMetaType);
                         ValueGetter<VBuffer<ReadOnlyMemory<char>>> mgetter =
@@ -1184,7 +1182,7 @@ namespace Microsoft.ML.Transforms.Conversions
                     var srcType = TypedMap.ItemType as KeyType;
                     _host.AssertValue(srcType);
                     var dstType = new KeyType(DataKind.U4, srcType.Min, srcType.Count);
-                    var convInst = Runtime.Data.Conversion.Conversions.Instance;
+                    var convInst = Data.Conversion.Conversions.Instance;
                     ValueMapper<T, uint> conv;
                     bool identity;
                     // If we can't convert this type to U4, don't try.

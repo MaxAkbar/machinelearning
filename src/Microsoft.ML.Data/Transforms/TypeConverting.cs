@@ -4,22 +4,19 @@
 
 #pragma warning disable 420 // volatile with Interlocked.CompareExchange
 
-using Microsoft.ML.Core.Data;
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
-using Microsoft.ML.Runtime.Model.Onnx;
-using Microsoft.ML.StaticPipe;
-using Microsoft.ML.StaticPipe.Runtime;
-using Microsoft.ML.Transforms.Conversions;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
+using Microsoft.ML.EntryPoints;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
+using Microsoft.ML.Model.Onnx;
+using Microsoft.ML.Transforms.Conversions;
 
 [assembly: LoadableClass(TypeConvertingTransformer.Summary, typeof(IDataTransform), typeof(TypeConvertingTransformer), typeof(TypeConvertingTransformer.Arguments), typeof(SignatureDataTransform),
     TypeConvertingTransformer.UserName, TypeConvertingTransformer.ShortName, "ConvertTransform", DocName = "transform/ConvertTransform.md")]
@@ -367,7 +364,7 @@ namespace Microsoft.ML.Transforms.Conversions
             if (range != null)
             {
                 itemType = TypeParsingUtils.ConstructKeyType(kind, range);
-                if (!srcType.ItemType.IsKey && !srcType.ItemType.IsText)
+                if (!srcType.ItemType.IsKey && !(srcType.ItemType is TextType))
                     return false;
             }
             else if (!(srcType.ItemType is KeyType key))
@@ -431,7 +428,7 @@ namespace Microsoft.ML.Transforms.Conversions
 
                 // Ensure that the conversion is legal. We don't actually cache the delegate here. It will get
                 // re-fetched by the utils code when needed.
-                if (!Runtime.Data.Conversion.Conversions.Instance.TryGetStandardConversion(srcType.ItemType, itemType, out Delegate del, out bool identity))
+                if (!Data.Conversion.Conversions.Instance.TryGetStandardConversion(srcType.ItemType, itemType, out Delegate del, out bool identity))
                     return false;
 
                 typeDst = itemType;
@@ -455,9 +452,9 @@ namespace Microsoft.ML.Transforms.Conversions
                     {
                         builder.Add(InputSchema[ColMapNewToOld[i]].Metadata, name => name == MetadataUtils.Kinds.KeyValues);
                     }
-                    if (srcType.ItemType.IsNumber && _types[i].ItemType.IsNumber)
+                    if (srcType.ItemType is NumberType && _types[i].ItemType is NumberType)
                         builder.Add(InputSchema[ColMapNewToOld[i]].Metadata, name => name == MetadataUtils.Kinds.IsNormalized);
-                    if (srcType.IsBool && _types[i].ItemType.IsNumber)
+                    if (srcType is BoolType && _types[i].ItemType is NumberType)
                     {
                         ValueGetter<bool> getter = (ref bool dst) => dst = true;
                         builder.Add(MetadataUtils.Kinds.IsNormalized, BoolType.Instance, getter);
@@ -558,10 +555,10 @@ namespace Microsoft.ML.Transforms.Conversions
                     throw Host.ExceptSchemaMismatch(nameof(inputSchema), "input", colInfo.Input);
                 if (!TypeConvertingTransformer.GetNewType(Host, col.ItemType, colInfo.OutputKind, colInfo.OutputKeyRange, out PrimitiveType newType))
                     throw Host.ExceptParam(nameof(inputSchema), $"Can't convert {colInfo.Input} into {newType.ToString()}");
-                if (!Runtime.Data.Conversion.Conversions.Instance.TryGetStandardConversion(col.ItemType, newType, out Delegate del, out bool identity))
+                if (!Data.Conversion.Conversions.Instance.TryGetStandardConversion(col.ItemType, newType, out Delegate del, out bool identity))
                     throw Host.ExceptParam(nameof(inputSchema), $"Don't know how to convert {colInfo.Input} into {newType.ToString()}");
                 var metadata = new List<SchemaShape.Column>();
-                if (col.ItemType.IsBool && newType.ItemType.IsNumber)
+                if (col.ItemType is BoolType && newType.ItemType is NumberType)
                     metadata.Add(new SchemaShape.Column(MetadataUtils.Kinds.IsNormalized, SchemaShape.Column.VectorKind.Scalar, BoolType.Instance, false));
                 if (col.Metadata.TryFindColumn(MetadataUtils.Kinds.SlotNames, out var slotMeta))
                     if (col.Kind == SchemaShape.Column.VectorKind.Vector)
@@ -570,7 +567,7 @@ namespace Microsoft.ML.Transforms.Conversions
                     if (col.ItemType.IsKey)
                         metadata.Add(new SchemaShape.Column(MetadataUtils.Kinds.KeyValues, SchemaShape.Column.VectorKind.Vector, keyMeta.ItemType, false));
                 if (col.Metadata.TryFindColumn(MetadataUtils.Kinds.IsNormalized, out var normMeta))
-                    if (col.ItemType.IsNumber && newType.ItemType.IsNumber)
+                    if (col.ItemType is NumberType && newType.ItemType is NumberType)
                         metadata.Add(new SchemaShape.Column(MetadataUtils.Kinds.KeyValues, SchemaShape.Column.VectorKind.Vector, normMeta.ItemType, false));
                 result[colInfo.Output] = new SchemaShape.Column(colInfo.Output, col.Kind, newType, false, col.Metadata);
             }

@@ -2,18 +2,17 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
-using Microsoft.ML.Runtime.Numeric;
 using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Data;
+using Microsoft.ML.EntryPoints;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
+using Microsoft.ML.Numeric;
 using Float = System.Single;
 
 [assembly: LoadableClass(typeof(MultiOutputRegressionEvaluator), typeof(MultiOutputRegressionEvaluator), typeof(MultiOutputRegressionEvaluator.Arguments), typeof(SignatureEvaluator),
@@ -26,7 +25,7 @@ using Float = System.Single;
 [assembly: LoadableClass(typeof(MultiOutputRegressionPerInstanceEvaluator), null, typeof(SignatureLoadRowMapper),
     "", MultiOutputRegressionPerInstanceEvaluator.LoaderSignature)]
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Data
 {
     public sealed class MultiOutputRegressionEvaluator : RegressionLossEvaluatorBase<MultiOutputRegressionEvaluator.Aggregator>
     {
@@ -592,7 +591,7 @@ namespace Microsoft.ML.Runtime.Data
         private ValueGetter<VBuffer<ReadOnlyMemory<char>>> CreateSlotNamesGetter(Schema schema, int column, int length, string prefix)
         {
             var type = schema[column].Metadata.Schema.GetColumnOrNull(MetadataUtils.Kinds.SlotNames)?.Type;
-            if (type != null && type.IsText)
+            if (type != null && type is TextType)
             {
                 return
                     (ref VBuffer<ReadOnlyMemory<char>> dst) => schema[column].Metadata.GetValue(MetadataUtils.Kinds.SlotNames, ref dst);

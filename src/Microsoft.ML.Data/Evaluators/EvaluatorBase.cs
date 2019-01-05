@@ -5,12 +5,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Data
 {
     /// <summary>
     /// This is a base class for TLC evaluators. It implements both of the <see cref="IEvaluator"/> methods: <see cref="Evaluate"/> and
@@ -367,7 +365,7 @@ namespace Microsoft.ML.Runtime.Data
                 Contracts.AssertNonWhiteSpace(stratCol);
                 Contracts.AssertValue(createAgg);
 
-                if (stratType.KeyCount == 0 && !stratType.IsText)
+                if (stratType.KeyCount == 0 && !(stratType is TextType))
                 {
                     throw Contracts.ExceptUserArg(nameof(MamlEvaluatorBase.ArgumentsBase.StratColumn),
                         "Stratification column '{0}' has type '{1}', but must be a known count key or text", stratCol, stratType);

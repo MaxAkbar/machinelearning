@@ -2,17 +2,17 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+using System.Collections.Immutable;
+using System.IO;
 using Microsoft.ML.Data;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Data.IO;
-using Microsoft.ML.Runtime.Model;
-using Microsoft.ML.Runtime.RunTests;
-using Microsoft.ML.Runtime.Tools;
+using Microsoft.ML.Data.IO;
+using Microsoft.ML.Model;
+using Microsoft.ML.RunTests;
+using Microsoft.ML.StaticPipe;
+using Microsoft.ML.Tools;
 using Microsoft.ML.Transforms;
 using Microsoft.ML.Transforms.Normalizers;
 using Microsoft.ML.Transforms.Projections;
-using System.Collections.Immutable;
-using System.IO;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -261,12 +261,12 @@ namespace Microsoft.ML.Tests.Transformers
         public void LpGcNormAndWhiteningWorkout()
         {
             string dataSource = GetDataPath(TestDatasets.generatedRegressionDataset.trainFilename);
-            var data = TextLoader.CreateReader(ML,
+            var data = TextLoaderStatic.CreateReader(ML,
                 c => (label: c.LoadFloat(11), features: c.LoadFloat(0, 10)),
                 separator: ';', hasHeader: true)
                 .Read(dataSource);
 
-            var invalidData = TextLoader.CreateReader(ML,
+            var invalidData = TextLoaderStatic.CreateReader(ML,
                 c => (label: c.LoadFloat(11), features: c.LoadText(0, 10)),
                 separator: ';', hasHeader: true)
                 .Read(dataSource);
@@ -295,12 +295,12 @@ namespace Microsoft.ML.Tests.Transformers
         public void WhiteningWorkout()
         {
             string dataSource = GetDataPath(TestDatasets.generatedRegressionDataset.trainFilename);
-            var data = TextLoader.CreateReader(ML,
+            var data = TextLoaderStatic.CreateReader(ML,
                 c => (label: c.LoadFloat(11), features: c.LoadFloat(0, 10)),
                 separator: ';', hasHeader: true)
                 .Read(dataSource);
 
-            var invalidData = TextLoader.CreateReader(ML,
+            var invalidData = TextLoaderStatic.CreateReader(ML,
                 c => (label: c.LoadFloat(11), features: c.LoadText(0, 10)),
                 separator: ';', hasHeader: true)
                 .Read(dataSource);
@@ -334,7 +334,7 @@ namespace Microsoft.ML.Tests.Transformers
         public void TestWhiteningOldSavingAndLoading()
         {
             string dataSource = GetDataPath(TestDatasets.generatedRegressionDataset.trainFilename);
-            var dataView = TextLoader.CreateReader(ML,
+            var dataView = TextLoaderStatic.CreateReader(ML,
                 c => (label: c.LoadFloat(11), features: c.LoadFloat(0, 10)),
                 separator: ';', hasHeader: true)
                 .Read(dataSource).AsDynamic;
@@ -355,12 +355,12 @@ namespace Microsoft.ML.Tests.Transformers
         public void LpNormWorkout()
         {
             string dataSource = GetDataPath(TestDatasets.generatedRegressionDataset.trainFilename);
-            var data = TextLoader.CreateReader(ML,
+            var data = TextLoaderStatic.CreateReader(ML,
                 c => (label: c.LoadFloat(11), features: c.LoadFloat(0, 10)),
                 separator: ';', hasHeader: true)
                 .Read(dataSource);
 
-            var invalidData = TextLoader.CreateReader(ML,
+            var invalidData = TextLoaderStatic.CreateReader(ML,
                 c => (label: c.LoadFloat(11), features: c.LoadText(0, 10)),
                 separator: ';', hasHeader: true)
                 .Read(dataSource);
@@ -394,7 +394,7 @@ namespace Microsoft.ML.Tests.Transformers
         public void TestLpNormOldSavingAndLoading()
         {
             string dataSource = GetDataPath(TestDatasets.generatedRegressionDataset.trainFilename);
-            var dataView = TextLoader.CreateReader(ML,
+            var dataView = TextLoaderStatic.CreateReader(ML,
                 c => (label: c.LoadFloat(11), features: c.LoadFloat(0, 10)),
                 separator: ';', hasHeader: true)
                 .Read(dataSource).AsDynamic;
@@ -414,12 +414,12 @@ namespace Microsoft.ML.Tests.Transformers
         public void GcnWorkout()
         {
             string dataSource = GetDataPath(TestDatasets.generatedRegressionDataset.trainFilename);
-            var data = TextLoader.CreateReader(ML,
+            var data = TextLoaderStatic.CreateReader(ML,
                 c => (label: c.LoadFloat(11), features: c.LoadFloat(0, 10)),
                 separator: ';', hasHeader: true)
                 .Read(dataSource);
 
-            var invalidData = TextLoader.CreateReader(ML,
+            var invalidData = TextLoaderStatic.CreateReader(ML,
                 c => (label: c.LoadFloat(11), features: c.LoadText(0, 10)),
                 separator: ';', hasHeader: true)
                 .Read(dataSource);
@@ -453,7 +453,7 @@ namespace Microsoft.ML.Tests.Transformers
         public void TestGcnNormOldSavingAndLoading()
         {
             string dataSource = GetDataPath(TestDatasets.generatedRegressionDataset.trainFilename);
-            var dataView = TextLoader.CreateReader(ML,
+            var dataView = TextLoaderStatic.CreateReader(ML,
                 c => (label: c.LoadFloat(11), features: c.LoadFloat(0, 10)),
                 separator: ';', hasHeader: true)
                 .Read(dataSource).AsDynamic;

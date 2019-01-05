@@ -4,19 +4,18 @@
 
 #pragma warning disable 420 // volatile with Interlocked.CompareExchange
 
-using Microsoft.ML.Core.Data;
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
-using Microsoft.ML.Transforms.Text;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
+using Microsoft.ML.Transforms.Text;
 
 [assembly: LoadableClass(TextNormalizingTransformer.Summary, typeof(IDataTransform), typeof(TextNormalizingTransformer), typeof(TextNormalizingTransformer.Arguments), typeof(SignatureDataTransform),
     "Text Normalizer Transform", "TextNormalizerTransform", "TextNormalizer", "TextNorm")]
@@ -287,7 +286,7 @@ namespace Microsoft.ML.Transforms.Text
                 disposer = null;
 
                 var srcType = input.Schema[_parent.ColumnPairs[iinfo].input].Type;
-                Host.Assert(srcType.ItemType.IsText);
+                Host.Assert(srcType.ItemType is TextType);
 
                 if (srcType.IsVector)
                 {
@@ -451,7 +450,7 @@ namespace Microsoft.ML.Transforms.Text
 
         }
 
-        public static bool IsColumnTypeValid(ColumnType type) => (type.ItemType.IsText);
+        public static bool IsColumnTypeValid(ColumnType type) => (type.ItemType is TextType);
 
         internal const string ExpectedColumnType = "Text or vector of text.";
 

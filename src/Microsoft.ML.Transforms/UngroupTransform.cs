@@ -6,14 +6,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Data.Conversion;
-using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
+using Microsoft.ML.EntryPoints;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
 using Microsoft.ML.Transforms;
 
 [assembly: LoadableClass(UngroupTransform.Summary, typeof(UngroupTransform), typeof(UngroupTransform.Arguments), typeof(SignatureDataTransform),
@@ -288,7 +286,7 @@ namespace Microsoft.ML.Transforms
                     if (!inputSchema.TryGetColumnIndex(name, out col))
                         throw ectx.ExceptUserArg(nameof(Arguments.Column), "Pivot column '{0}' is not found", name);
                     var colType = inputSchema[col].Type;
-                    if (!colType.IsVector || !colType.ItemType.IsPrimitive)
+                    if (!colType.IsVector || !(colType.ItemType is PrimitiveType))
                         throw ectx.ExceptUserArg(nameof(Arguments.Column),
                             "Pivot column '{0}' has type '{1}', but must be a vector of primitive types", name, colType);
                     infos[i] = new PivotColumnInfo(name, col, colType.VectorSize, (PrimitiveType)colType.ItemType);
@@ -611,7 +609,7 @@ namespace Microsoft.ML.Transforms
                 // cachedIndex == row.Count || _pivotColPosition <= row.Indices[cachedIndex].
                 int cachedIndex = 0;
                 VBuffer<T> row = default(VBuffer<T>);
-                T naValue = Runtime.Data.Conversion.Conversions.Instance.GetNAOrDefault<T>(itemType);
+                T naValue = Data.Conversion.Conversions.Instance.GetNAOrDefault<T>(itemType);
                 return
                     (ref T value) =>
                     {

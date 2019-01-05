@@ -2,19 +2,18 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Core.Data;
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
-using Microsoft.ML.Transforms.Conversions;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
+using Microsoft.ML.Transforms.Conversions;
 
 [assembly: LoadableClass(HashingTransformer.Summary, typeof(IDataTransform), typeof(HashingTransformer), typeof(HashingTransformer.Arguments), typeof(SignatureDataTransform),
     "Hash Transform", "HashTransform", "Hash", DocName = "transform/HashTransform.md")]
@@ -1202,7 +1201,7 @@ namespace Microsoft.ML.Transforms.Conversions
         internal static bool IsColumnTypeValid(ColumnType type)
         {
             var itemType = type.ItemType;
-            return itemType.IsText || itemType.IsKey || itemType.IsNumber || itemType.IsBool;
+            return itemType is TextType || itemType.IsKey || itemType is NumberType || itemType is BoolType;
         }
 
         internal const string ExpectedColumnType = "Expected Text, Key, numeric or Boolean item type";

@@ -3,17 +3,11 @@
 // See the LICENSE file in the project root for more information.
 
 using Microsoft.ML.Data;
-using Microsoft.ML.Legacy.Models;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Model;
-using Microsoft.ML.Runtime.RunTests;
-using System.IO;
+using Microsoft.ML.RunTests;
 using Xunit;
 
 namespace Microsoft.ML.Scenarios
 {
-#pragma warning disable 612
     public partial class ScenariosTests
     {
         [Fact]
@@ -48,7 +42,7 @@ namespace Microsoft.ML.Scenarios
             // Make prediction and then evaluate the trained pipeline
             var predicted = trainedModel.Transform(testData);
             var metrics = mlContext.MulticlassClassification.Evaluate(predicted);
-            CompareMatrics(metrics);
+            CompareMetrics(metrics);
             var predictFunction = trainedModel.CreatePredictionEngine<IrisData, IrisPrediction>(mlContext);
             ComparePredictions(predictFunction);
         }
@@ -92,7 +86,7 @@ namespace Microsoft.ML.Scenarios
             Assert.Equal(0, prediction.PredictedLabels[2], 2);
         }
 
-        private void CompareMatrics(MultiClassClassifierMetrics metrics)
+        private void CompareMetrics(MultiClassClassifierMetrics metrics)
         {
             Assert.Equal(.98, metrics.AccuracyMacro);
             Assert.Equal(.98, metrics.AccuracyMicro, 2);
@@ -104,39 +98,5 @@ namespace Microsoft.ML.Scenarios
             Assert.Equal(.1, metrics.PerClassLogLoss[1], 1);
             Assert.Equal(.1, metrics.PerClassLogLoss[2], 1);
         }
-
-        private ClassificationMetrics Evaluate(IHostEnvironment env, IDataView scoredData)
-        {
-            var dataEval = new RoleMappedData(scoredData, label: "Label", feature: "Features", opt: true);
-
-            // Evaluate.
-            // It does not work. It throws error "Failed to find 'Score' column" when Evaluate is called
-            //var evaluator = new MultiClassClassifierEvaluator(env, new MultiClassClassifierEvaluator.Arguments() { OutputTopKAcc = 3 });
-
-            IMamlEvaluator evaluator = new MultiClassMamlEvaluator(env, new MultiClassMamlEvaluator.Arguments() { OutputTopKAcc = 3 });
-            var metricsDic = evaluator.Evaluate(dataEval);
-
-            return ClassificationMetrics.FromMetrics(env, metricsDic["OverallMetrics"], metricsDic["ConfusionMatrix"])[0];
-        }
-
-        private IDataScorerTransform GetScorer(IHostEnvironment env, IDataView transforms, IPredictor pred, string testDataPath = null)
-        {
-            using (var ch = env.Start("Saving model"))
-            using (var memoryStream = new MemoryStream())
-            {
-                var trainRoles = new RoleMappedData(transforms, label: "Label", feature: "Features");
-
-                // Model cannot be saved with CacheDataView
-                TrainUtils.SaveModel(env, ch, memoryStream, pred, trainRoles);
-                memoryStream.Position = 0;
-                using (var rep = RepositoryReader.Open(memoryStream, ch))
-                {
-                    IDataLoader testPipe = ModelFileUtils.LoadLoader(env, rep, new MultiFileSource(testDataPath), true);
-                    RoleMappedData testRoles = new RoleMappedData(testPipe, label: "Label", feature: "Features");
-                    return ScoreUtils.GetScorer(pred, testRoles, env, testRoles.Schema);
-                }
-            }
-        }
     }
-#pragma warning restore 612
 }

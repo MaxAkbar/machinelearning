@@ -2,26 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Calibrator;
-using Microsoft.ML.Core.Data;
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Data.Conversion;
-using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.Internal.Calibration;
-using Microsoft.ML.Runtime.Internal.Internallearn;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
-using Microsoft.ML.Runtime.Model.Onnx;
-using Microsoft.ML.Runtime.Model.Pfa;
-using Microsoft.ML.Runtime.Training;
-using Microsoft.ML.Runtime.TreePredictor;
-using Microsoft.ML.Trainers.FastTree.Internal;
-using Microsoft.ML.Transforms;
-using Microsoft.ML.Transforms.Conversions;
-using Newtonsoft.Json.Linq;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -30,6 +10,24 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using Microsoft.ML.Calibrator;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
+using Microsoft.ML.Data.Conversion;
+using Microsoft.ML.EntryPoints;
+using Microsoft.ML.Internal.Calibration;
+using Microsoft.ML.Internal.Internallearn;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
+using Microsoft.ML.Model.Onnx;
+using Microsoft.ML.Model.Pfa;
+using Microsoft.ML.Trainers.FastTree.Internal;
+using Microsoft.ML.Training;
+using Microsoft.ML.Transforms;
+using Microsoft.ML.Transforms.Conversions;
+using Microsoft.ML.TreePredictor;
+using Newtonsoft.Json.Linq;
 using Float = System.Single;
 
 // All of these reviews apply in general to fast tree and random forest implementations.
@@ -2947,7 +2945,7 @@ namespace Microsoft.ML.Trainers.FastTree
                 (in VBuffer<Float> src, ref VBuffer<Float> dst) =>
                 {
                     FeatureContributionMap(in src, ref dst, ref builder);
-                    Runtime.Numeric.VectorUtils.SparsifyNormalize(ref dst, top, bottom, normalize);
+                    Numeric.VectorUtils.SparsifyNormalize(ref dst, top, bottom, normalize);
                 };
             return (ValueMapper<TSrc, VBuffer<Float>>)(Delegate)del;
         }
@@ -2987,39 +2985,9 @@ namespace Microsoft.ML.Trainers.FastTree
         void ICanSaveInIniFormat.SaveAsIni(TextWriter writer, RoleMappedSchema schema, ICalibrator calibrator)
         {
             Host.CheckValue(writer, nameof(writer));
-            Host.CheckValue(schema, nameof(schema));
-            Host.CheckValueOrNull(calibrator);
-            string ensembleIni = TrainedEnsemble.ToTreeEnsembleIni(new FeaturesToContentMap(schema),
+            var ensembleIni = FastTreeIniFileUtils.TreeEnsembleToIni(Host, TrainedEnsemble, schema, calibrator,
                 InnerArgs, appendFeatureGain: true, includeZeroGainFeatures: false);
-            ensembleIni = AddCalibrationToIni(ensembleIni, calibrator);
             writer.WriteLine(ensembleIni);
-        }
-
-        /// <summary>
-        /// Get the calibration summary in INI format
-        /// </summary>
-        private string AddCalibrationToIni(string ini, ICalibrator calibrator)
-        {
-            Host.AssertValue(ini);
-            Host.AssertValueOrNull(calibrator);
-
-            if (calibrator == null)
-                return ini;
-
-            if (calibrator is PlattCalibrator)
-            {
-                string calibratorEvaluatorIni = IniFileUtils.GetCalibratorEvaluatorIni(ini, calibrator as PlattCalibrator);
-                return IniFileUtils.AddEvaluator(ini, calibratorEvaluatorIni);
-            }
-            else
-            {
-                StringBuilder newSection = new StringBuilder();
-                newSection.AppendLine();
-                newSection.AppendLine();
-                newSection.AppendLine("[TLCCalibration]");
-                newSection.AppendLine("Type=" + calibrator.GetType().Name);
-                return ini + newSection;
-            }
         }
 
         JToken ISingleCanSavePfa.SaveAsPfa(BoundPfaContext ctx, JToken input)

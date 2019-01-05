@@ -2,21 +2,19 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Core.Data;
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
-using Microsoft.ML.Runtime.Model.Onnx;
-using Microsoft.ML.Runtime.Model.Pfa;
-using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Data;
+using Microsoft.ML.EntryPoints;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
+using Microsoft.ML.Model.Onnx;
+using Microsoft.ML.Model.Pfa;
+using Newtonsoft.Json.Linq;
 
 [assembly: LoadableClass(ColumnConcatenatingTransformer.Summary, typeof(IDataTransform), typeof(ColumnConcatenatingTransformer), typeof(ColumnConcatenatingTransformer.TaggedArguments), typeof(SignatureDataTransform),
     ColumnConcatenatingTransformer.UserName, ColumnConcatenatingTransformer.LoadName, "ConcatTransform", DocName = "transform/ConcatTransform.md")]
@@ -30,7 +28,7 @@ using System.Text;
 [assembly: LoadableClass(typeof(IRowMapper), typeof(ColumnConcatenatingTransformer), null, typeof(SignatureLoadRowMapper),
     ColumnConcatenatingTransformer.UserName, ColumnConcatenatingTransformer.LoaderSignature)]
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Data
 {
     using PfaType = PfaUtils.Type;
 
@@ -488,7 +486,7 @@ namespace Microsoft.ML.Runtime.Data
                         hasSlotNames = true;
                 }
 
-                if (!itemType.IsNumber)
+                if (!(itemType is NumberType))
                     isNormalized = false;
                 if (totalSize == 0)
                 {
@@ -627,7 +625,7 @@ namespace Microsoft.ML.Runtime.Data
                         if (inputMetadata != null && inputMetadata.Schema.TryGetColumnIndex(MetadataUtils.Kinds.SlotNames, out int idx))
                             typeNames = inputMetadata.Schema[idx].Type;
 
-                        if (typeNames != null && typeNames.VectorSize == typeSrc.VectorSize && typeNames.ItemType.IsText)
+                        if (typeNames != null && typeNames.VectorSize == typeSrc.VectorSize && typeNames.ItemType is TextType)
                         {
                             inputMetadata.GetValue(MetadataUtils.Kinds.SlotNames, ref names);
                             sb.Clear();
@@ -793,7 +791,7 @@ namespace Microsoft.ML.Runtime.Data
                         var srcName = _columnInfo.Inputs[i].name;
                         if ((srcTokens[i] = ctx.TokenOrNullForName(srcName)) == null)
                             return new KeyValuePair<string, JToken>(outName, null);
-                        srcPrimitive[i] = _srcTypes[i].IsPrimitive;
+                        srcPrimitive[i] = _srcTypes[i] is PrimitiveType;
                     }
                     Contracts.Assert(srcTokens.All(tok => tok != null));
                     var itemColumnType = OutputType.ItemType;

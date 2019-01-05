@@ -2,15 +2,14 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
 using System;
 using System.Collections.Generic;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Data;
+using Microsoft.ML.EntryPoints;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
 using Float = System.Single;
 
 [assembly: LoadableClass(typeof(QuantileRegressionEvaluator), typeof(QuantileRegressionEvaluator), typeof(QuantileRegressionEvaluator.Arguments), typeof(SignatureEvaluator),
@@ -23,7 +22,7 @@ using Float = System.Single;
 [assembly: LoadableClass(typeof(QuantileRegressionPerInstanceEvaluator), null, typeof(SignatureLoadRowMapper),
     "", QuantileRegressionPerInstanceEvaluator.LoaderSignature)]
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Data
 {
     public sealed class QuantileRegressionEvaluator :
         RegressionEvaluatorBase<QuantileRegressionEvaluator.Aggregator, VBuffer<Float>, VBuffer<Double>>
@@ -45,7 +44,7 @@ namespace Microsoft.ML.Runtime.Data
             var scoreInfo = schema.GetUniqueColumn(MetadataUtils.Const.ScoreValueKind.Score);
             int scoreSize = scoreInfo.Type.VectorSize;
             var type = schema.Schema[scoreInfo.Index].Metadata.Schema.GetColumnOrNull(MetadataUtils.Kinds.SlotNames)?.Type;
-            Host.Check(type != null && type.IsKnownSizeVector && type.ItemType.IsText, "Quantile regression score column must have slot names");
+            Host.Check(type != null && type.IsKnownSizeVector && type.ItemType is TextType, "Quantile regression score column must have slot names");
             var quantiles = default(VBuffer<ReadOnlyMemory<char>>);
             schema.Schema[scoreInfo.Index].Metadata.GetValue(MetadataUtils.Kinds.SlotNames, ref quantiles);
             Host.Assert(quantiles.IsDense && quantiles.Length == scoreSize);
@@ -72,7 +71,7 @@ namespace Microsoft.ML.Runtime.Data
             Host.Assert(t.VectorSize > 0 && (t.ItemType == NumberType.R4 || t.ItemType == NumberType.R8));
             var slotNames = default(VBuffer<ReadOnlyMemory<char>>);
             t = schema.Schema[scoreInfo.Index].Metadata.Schema.GetColumnOrNull(MetadataUtils.Kinds.SlotNames)?.Type;
-            if (t != null && t.VectorSize == scoreInfo.Type.VectorSize && t.ItemType.IsText)
+            if (t != null && t.VectorSize == scoreInfo.Type.VectorSize && t.ItemType is TextType)
                 schema.Schema[scoreInfo.Index].GetSlotNames(ref slotNames);
             return new Aggregator(Host, LossFunction, schema.Weight != null, scoreInfo.Type.VectorSize, in slotNames, stratName);
         }

@@ -2,13 +2,11 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Internal.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Microsoft.ML.Internal.Utilities;
 
 namespace Microsoft.ML.Data
 {
@@ -276,7 +274,7 @@ namespace Microsoft.ML.Data
                     // VBuffer<ReadOnlyMemory<char>> -> String[]
                     if (fieldType.GetElementType() == typeof(string))
                     {
-                        Ch.Assert(colType.ItemType.IsText);
+                        Ch.Assert(colType.ItemType is TextType);
                         return CreateConvertingVBufferSetter<ReadOnlyMemory<char>, string>(input, index, poke, peek, x => x.ToString());
                     }
 
@@ -298,12 +296,12 @@ namespace Microsoft.ML.Data
                     del = CreateVBufferToVBufferSetter<int>;
                     genericType = colType.ItemType.RawType;
                 }
-                else if (colType.IsPrimitive)
+                else if (colType is PrimitiveType)
                 {
                     if (fieldType == typeof(string))
                     {
                         // ReadOnlyMemory<char> -> String
-                        Ch.Assert(colType.IsText);
+                        Ch.Assert(colType is TextType);
                         Ch.Assert(peek == null);
                         return CreateConvertingActionSetter<ReadOnlyMemory<char>, string>(input, index, poke, x => x.ToString());
                     }

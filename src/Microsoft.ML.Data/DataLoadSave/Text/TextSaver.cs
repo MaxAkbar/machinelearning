@@ -5,19 +5,17 @@
 using System;
 using System.IO;
 using System.Text;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Data.Conversion;
-using Microsoft.ML.Runtime.Data.IO;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Internal.Internallearn;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
+using Microsoft.ML.Data.Conversion;
+using Microsoft.ML.Data.IO;
+using Microsoft.ML.Internal.Utilities;
 
 [assembly: LoadableClass(TextSaver.Summary, typeof(TextSaver), typeof(TextSaver.Arguments), typeof(SignatureDataSaver),
     "Text Saver", "TextSaver", "Text", DocName = "saver/TextSaver.md")]
 
-namespace Microsoft.ML.Runtime.Data.IO
+namespace Microsoft.ML.Data.IO
 {
     public sealed class TextSaver : IDataSaver
     {
@@ -88,11 +86,11 @@ namespace Microsoft.ML.Runtime.Data.IO
             protected ValueWriterBase(PrimitiveType type, int source, char sep)
                 : base(source)
             {
-                Contracts.Assert(type.IsStandardScalar || type.IsKey);
+                Contracts.Assert(type.IsStandardScalar() || type.IsKey);
                 Contracts.Assert(type.RawType == typeof(T));
 
                 Sep = sep;
-                if (type.IsText)
+                if (type is TextType)
                 {
                     // For text we need to deal with escaping.
                     ValueMapper<ReadOnlyMemory<char>, StringBuilder> c = MapText;
@@ -156,7 +154,7 @@ namespace Microsoft.ML.Runtime.Data.IO
                 ColumnType typeNames;
                 if (type.IsKnownSizeVector &&
                     (typeNames = cursor.Schema[source].Metadata.Schema.GetColumnOrNull(MetadataUtils.Kinds.SlotNames)?.Type) != null &&
-                    typeNames.VectorSize == type.VectorSize && typeNames.ItemType.IsText)
+                    typeNames.VectorSize == type.VectorSize && typeNames.ItemType is TextType)
                 {
                     cursor.Schema[source].Metadata.GetValue(MetadataUtils.Kinds.SlotNames, ref _slotNames);
                     Contracts.Check(_slotNames.Length == typeNames.VectorSize, "Unexpected slot names length");
@@ -316,7 +314,7 @@ namespace Microsoft.ML.Runtime.Data.IO
         public bool IsColumnSavable(ColumnType type)
         {
             var item = type.ItemType;
-            return item.IsStandardScalar || item.IsKey;
+            return item.IsStandardScalar() || item.IsKey;
         }
 
         public void SaveData(Stream stream, IDataView data, params int[] cols)
@@ -409,7 +407,7 @@ namespace Microsoft.ML.Runtime.Data.IO
                     if (!type.IsKnownSizeVector)
                         continue;
                     var typeNames = data.Schema[cols[i]].Metadata.Schema.GetColumnOrNull(MetadataUtils.Kinds.SlotNames)?.Type;
-                    if (typeNames != null && typeNames.VectorSize == type.VectorSize && typeNames.ItemType.IsText)
+                    if (typeNames != null && typeNames.VectorSize == type.VectorSize && typeNames.ItemType is TextType)
                         hasHeader = true;
                 }
             }

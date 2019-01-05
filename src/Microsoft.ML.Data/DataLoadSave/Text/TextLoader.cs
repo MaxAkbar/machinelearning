@@ -2,18 +2,17 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Core.Data;
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
 using Float = System.Single;
 
 [assembly: LoadableClass(TextLoader.Summary, typeof(IDataLoader), typeof(TextLoader), typeof(TextLoader.Arguments), typeof(SignatureDataLoader),
@@ -22,7 +21,7 @@ using Float = System.Single;
 [assembly: LoadableClass(TextLoader.Summary, typeof(IDataLoader), typeof(TextLoader), null, typeof(SignatureLoadDataLoader),
     "Text Loader", TextLoader.LoaderSignature)]
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Data
 {
     /// <summary>
     /// Loads a text file into an IDataView. Supports basic mapping from input columns to IDataView columns.
@@ -406,7 +405,7 @@ namespace Microsoft.ML.Runtime.Data
         /// Used as an input column range.
         /// A variable length segment (extending to the end of the input line) is represented by Lim == SrcLim.
         /// </summary>
-        private struct Segment
+        internal struct Segment
         {
             public int Min;
             public int Lim;
@@ -441,7 +440,7 @@ namespace Microsoft.ML.Runtime.Data
         /// <summary>
         /// Information for an output column.
         /// </summary>
-        private sealed class ColInfo
+        internal sealed class ColInfo
         {
             public readonly string Name;
             // REVIEW: Fix this for keys.
@@ -1361,6 +1360,8 @@ namespace Microsoft.ML.Runtime.Data
         public IDataView Read(IMultiStreamSource source) => new BoundLoader(this, source);
 
         public IDataView Read(string path) => Read(new MultiFileSource(path));
+
+        public IDataView Read(params string[] path) => Read(new MultiFileSource(path));
 
         internal static TextLoader CreateTextReader<TInput>(IHostEnvironment host,
            bool hasHeader = DefaultArguments.HasHeader,

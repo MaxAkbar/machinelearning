@@ -2,16 +2,14 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Internal.Utilities;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using Microsoft.ML.Data;
+using Microsoft.ML.Internal.Utilities;
 
 namespace Microsoft.ML.Transforms.TensorFlow
 {
@@ -105,14 +103,14 @@ namespace Microsoft.ML.Transforms.TensorFlow
                 var type = schema[i].Type;
 
                 var metadataType = schema[i].Metadata.Schema.GetColumnOrNull(TensorFlowUtils.OpType)?.Type;
-                Contracts.Assert(metadataType != null && metadataType.IsText);
+                Contracts.Assert(metadataType != null && metadataType is TextType);
                 ReadOnlyMemory<char> opType = default;
                 schema[i].Metadata.GetValue(TensorFlowUtils.OpType, ref opType);
                 metadataType = schema[i].Metadata.Schema.GetColumnOrNull(TensorFlowUtils.InputOps)?.Type;
                 VBuffer<ReadOnlyMemory<char>> inputOps = default;
                 if (metadataType != null)
                 {
-                    Contracts.Assert(metadataType.IsKnownSizeVector && metadataType.ItemType.IsText);
+                    Contracts.Assert(metadataType.IsKnownSizeVector && metadataType.ItemType is TextType);
                     schema[i].Metadata.GetValue(TensorFlowUtils.InputOps, ref inputOps);
                 }
 

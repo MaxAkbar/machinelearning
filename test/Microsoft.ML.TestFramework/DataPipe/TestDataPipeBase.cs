@@ -2,22 +2,21 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Core.Data;
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Data.IO;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
-using Microsoft.ML.TestFramework;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
+using Microsoft.ML.Data.IO;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
+using Microsoft.ML.TestFramework;
 using Xunit;
 
-namespace Microsoft.ML.Runtime.RunTests
+namespace Microsoft.ML.RunTests
 {
     public abstract partial class TestDataPipeBase : TestDataViewBase
     {
@@ -618,7 +617,7 @@ namespace Microsoft.ML.Runtime.RunTests
                 Fail("Different {0} metadata types: {0} vs {1}", kind, t1, t2);
                 return Failed();
             }
-            if (!t1.ItemType.IsText)
+            if (!(t1.ItemType is TextType))
             {
                 if (!mustBeText)
                 {

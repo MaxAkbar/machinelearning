@@ -2,17 +2,15 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Float = System.Single;
-
 using System;
 using System.Text;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
 using Microsoft.ML.Transforms;
+using Float = System.Single;
 
 [assembly: LoadableClass(typeof(MissingValueIndicatorTransform), typeof(MissingValueIndicatorTransform.Arguments), typeof(SignatureDataTransform),
     "", "MissingValueIndicatorTransform", "MissingValueTransform", "MissingTransform", "Missing")]
@@ -152,7 +150,7 @@ namespace Microsoft.ML.Transforms
                     if (!type.IsKnownSizeVector ||
                         (typeNames = Source.Schema[Infos[iinfo].Source].Metadata.Schema.GetColumnOrNull(MetadataUtils.Kinds.SlotNames)?.Type) == null ||
                         typeNames.VectorSize != type.VectorSize ||
-                        !typeNames.ItemType.IsText)
+                        !(typeNames.ItemType is TextType))
                     {
                         continue;
                     }
@@ -200,7 +198,7 @@ namespace Microsoft.ML.Transforms
 
                 // REVIEW: Do we need to verify that there is metadata or should we just call GetMetadata?
                 var typeNames = Source.Schema[Infos[iinfo].Source].Metadata.Schema.GetColumnOrNull(MetadataUtils.Kinds.SlotNames)?.Type;
-                if (typeNames == null || typeNames.VectorSize != type.VectorSize || !typeNames.ItemType.IsText)
+                if (typeNames == null || typeNames.VectorSize != type.VectorSize || !(typeNames.ItemType is TextType))
                     throw MetadataUtils.ExceptGetMetadata();
 
                 var names = default(VBuffer<ReadOnlyMemory<char>>);

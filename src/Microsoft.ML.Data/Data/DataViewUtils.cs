@@ -9,11 +9,10 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime.Data.Conversion;
-using Microsoft.ML.Runtime.Internal.Utilities;
+using Microsoft.ML.Data.Conversion;
+using Microsoft.ML.Internal.Utilities;
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Data
 {
     public static class DataViewUtils
     {
@@ -200,7 +199,7 @@ namespace Microsoft.ML.Runtime.Data
         /// </summary>
         public static bool IsCachable(this ColumnType type)
         {
-            return type != null && (type.IsPrimitive || type.IsVector);
+            return type != null && (type is PrimitiveType || type.IsVector);
         }
 
         /// <summary>
@@ -860,7 +859,7 @@ namespace Microsoft.ML.Runtime.Data
                         pipeType = typeof(ImplVec<>).MakeGenericType(type.ItemType.RawType);
                     else
                     {
-                        Contracts.Assert(type.IsPrimitive);
+                        Contracts.Assert(type is PrimitiveType);
                         pipeType = typeof(ImplOne<>).MakeGenericType(type.RawType);
                     }
                     var constructor = pipeType.GetConstructor(new Type[] { typeof(object) });

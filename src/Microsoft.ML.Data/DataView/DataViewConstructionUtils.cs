@@ -2,17 +2,14 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Reflection;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Data
 {
     /// <summary>
     /// A helper class to create data views based on the user-provided types.
@@ -171,7 +168,7 @@ namespace Microsoft.ML.Runtime.Data
                     // String[] -> ReadOnlyMemory<char>
                     if (outputType.GetElementType() == typeof(string))
                     {
-                        Host.Assert(colType.ItemType.IsText);
+                        Host.Assert(colType.ItemType is TextType);
                         return CreateConvertingArrayGetterDelegate<string, ReadOnlyMemory<char>>(peek, x => x != null ? x.AsMemory() : ReadOnlyMemory<char>.Empty);
                     }
 
@@ -193,12 +190,12 @@ namespace Microsoft.ML.Runtime.Data
                     del = CreateDirectVBufferGetterDelegate<int>;
                     genericType = colType.ItemType.RawType;
                 }
-                else if (colType.IsPrimitive)
+                else if (colType is PrimitiveType)
                 {
                     if (outputType == typeof(string))
                     {
                         // String -> ReadOnlyMemory<char>
-                        Host.Assert(colType.IsText);
+                        Host.Assert(colType is TextType);
                         return CreateConvertingGetterDelegate<String, ReadOnlyMemory<char>>(peek, x => x != null ? x.AsMemory() : ReadOnlyMemory<char>.Empty);
                     }
 
@@ -935,12 +932,12 @@ namespace Microsoft.ML.Runtime.Data
                     .MakeGenericMethod(MetadataType.ItemType.RawType)
                     .Invoke(this, new object[] { }) as ValueGetter<TDst>;
             }
-            if (MetadataType.IsPrimitive)
+            if (MetadataType is PrimitiveType)
             {
                 if (typeT == typeof(string))
                 {
                     // String -> ReadOnlyMemory<char>
-                    Contracts.Assert(MetadataType.IsText);
+                    Contracts.Assert(MetadataType is TextType);
                     ValueGetter<ReadOnlyMemory<char>> m = GetString;
                     return m as ValueGetter<TDst>;
                 }

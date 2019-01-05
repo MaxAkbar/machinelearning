@@ -6,13 +6,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Microsoft.ML.Runtime.Command;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data.IO;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
+using Microsoft.ML.Command;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Data.IO;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Data
 {
     /// <summary>
     /// This holds useful base classes for commands that ingest a primary dataset and deal with associated model files.
@@ -167,7 +167,7 @@ namespace Microsoft.ML.Runtime.Data
                             {
                                 var nameOfMetric = "TLC_" + cursor.Schema[currentIndex].Name;
                                 var type = cursor.Schema[currentIndex].Type;
-                                if (type.IsNumber)
+                                if (type is NumberType)
                                 {
                                     var getter = RowCursorUtils.GetGetterAs<double>(NumberType.R8, cursor, currentIndex);
                                     double metricValue = 0;

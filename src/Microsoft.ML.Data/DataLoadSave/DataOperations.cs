@@ -3,11 +3,10 @@
 // See the LICENSE file in the project root for more information.
 
 using Microsoft.ML.Data;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Internal.Utilities;
+using Microsoft.ML.Internal.Utilities;
 using Microsoft.ML.Transforms;
 
-namespace Microsoft.ML.Runtime
+namespace Microsoft.ML
 {
     /// <summary>
     /// A catalog of operations over data that are not transformers or estimators.
@@ -15,6 +14,7 @@ namespace Microsoft.ML.Runtime
     /// </summary>
     public sealed class DataOperations
     {
+        [BestFriend]
         internal IHostEnvironment Environment { get; }
 
         internal DataOperations(IHostEnvironment env)
@@ -61,7 +61,7 @@ namespace Microsoft.ML.Runtime
             Environment.CheckParam(lowerBound <= upperBound, nameof(upperBound), "Must be no less than lowerBound");
 
             var type = input.Schema[columnName].Type;
-            if (!type.IsNumber)
+            if (!(type is NumberType))
                 throw Environment.ExceptSchemaMismatch(nameof(columnName), "filter", columnName, "number", type.ToString());
             return new RangeFilter(Environment, input, columnName, lowerBound, upperBound, false);
         }

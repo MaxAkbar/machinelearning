@@ -1,7 +1,7 @@
-﻿using Microsoft.ML.LightGBM.StaticPipe;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.StaticPipe;
 using System;
+using Microsoft.ML.Data;
+using Microsoft.ML.LightGBM.StaticPipe;
+using Microsoft.ML.StaticPipe;
 
 namespace Microsoft.ML.Samples.Static
 {
@@ -34,7 +34,7 @@ namespace Microsoft.ML.Samples.Static
             var mlContext = new MLContext();
 
             // Creating Data Reader with the initial schema based on the format of the data
-            var reader = TextLoader.CreateReader(
+            var reader = TextLoaderStatic.CreateReader(
                 mlContext,
                 c => (
                     Age: c.LoadFloat(0),

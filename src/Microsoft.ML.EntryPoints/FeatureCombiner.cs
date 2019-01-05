@@ -2,21 +2,20 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Transforms.Conversions;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Data;
+using Microsoft.ML.EntryPoints;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Transforms.Conversions;
 
 [assembly: LoadableClass(typeof(void), typeof(FeatureCombiner), null, typeof(SignatureEntryPointModule), "FeatureCombiner")]
 
-namespace Microsoft.ML.Runtime.EntryPoints
+namespace Microsoft.ML.EntryPoints
 {
     public static class FeatureCombiner
     {
@@ -121,7 +120,7 @@ namespace Microsoft.ML.Runtime.EntryPoints
             if (!schema.TryGetColumnIndex(colName, out col))
                 return null;
             var type = schema[col].Metadata.Schema.GetColumnOrNull(MetadataUtils.Kinds.KeyValues)?.Type;
-            if (type == null || !type.IsKnownSizeVector || !type.ItemType.IsText)
+            if (type == null || !type.IsKnownSizeVector || !(type.ItemType is TextType))
                 return null;
             var metadata = default(VBuffer<ReadOnlyMemory<char>>);
             schema[col].Metadata.GetValue(MetadataUtils.Kinds.KeyValues, ref metadata);
@@ -178,7 +177,7 @@ namespace Microsoft.ML.Runtime.EntryPoints
                             continue;
                         }
                     }
-                    if (type.IsNumber || type.IsBool)
+                    if (type is NumberType || type is BoolType)
                     {
                         // Even if the column is R4 in training, we still want to add it to the conversion.
                         // The reason is that at scoring time, the column might have a slightly different type (R8 for example).
@@ -236,7 +235,7 @@ namespace Microsoft.ML.Runtime.EntryPoints
             if (!input.Data.Schema.TryGetColumnIndex(input.LabelColumn, out labelCol))
                 throw host.Except($"Column '{input.LabelColumn}' not found.");
             var labelType = input.Data.Schema[labelCol].Type;
-            if (labelType.IsKey || labelType.IsBool)
+            if (labelType.IsKey || labelType is BoolType)
             {
                 var nop = NopTransform.CreateIfNeeded(env, input.Data);
                 return new CommonOutputs.TransformOutput { Model = new TransformModelImpl(env, nop, input.Data), OutputData = nop };
@@ -271,7 +270,7 @@ namespace Microsoft.ML.Runtime.EntryPoints
             if (!input.Data.Schema.TryGetColumnIndex(input.PredictedLabelColumn, out predictedLabelCol))
                 throw host.Except($"Column '{input.PredictedLabelColumn}' not found.");
             var predictedLabelType = input.Data.Schema[predictedLabelCol].Type;
-            if (predictedLabelType.IsNumber || predictedLabelType.IsBool)
+            if (predictedLabelType is NumberType || predictedLabelType is BoolType)
             {
                 var nop = NopTransform.CreateIfNeeded(env, input.Data);
                 return new CommonOutputs.TransformOutput { Model = new TransformModelImpl(env, nop, input.Data), OutputData = nop };
@@ -293,7 +292,7 @@ namespace Microsoft.ML.Runtime.EntryPoints
             if (!input.Data.Schema.TryGetColumnIndex(input.LabelColumn, out labelCol))
                 throw host.Except($"Column '{input.LabelColumn}' not found.");
             var labelType = input.Data.Schema[labelCol].Type;
-            if (labelType == NumberType.R4 || !labelType.IsNumber)
+            if (labelType == NumberType.R4 || !(labelType is NumberType))
             {
                 var nop = NopTransform.CreateIfNeeded(env, input.Data);
                 return new CommonOutputs.TransformOutput { Model = new TransformModelImpl(env, nop, input.Data), OutputData = nop };

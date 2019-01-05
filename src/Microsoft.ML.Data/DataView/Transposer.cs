@@ -7,11 +7,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime.Data.IO;
-using Microsoft.ML.Runtime.Internal.Utilities;
+using Microsoft.ML.Data.IO;
+using Microsoft.ML.Internal.Utilities;
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Data
 {
     /// <summary>
     /// This provides a scalable method of getting a "transposed" view of a subset of columns from an
@@ -417,7 +416,7 @@ namespace Microsoft.ML.Runtime.Data
                     Ch.Assert(parent._splitLim[iinfo] - _col == 1);
                 }
                 Ch.AssertValue(_view);
-                Ch.Assert(_view.Schema[_col].Type.IsPrimitive);
+                Ch.Assert(_view.Schema[_col].Type is PrimitiveType);
                 Ch.Assert(_view.Schema[_col].Type.RawType == typeof(T));
                 _len = parent.RowCount;
             }
@@ -1016,7 +1015,7 @@ namespace Microsoft.ML.Runtime.Data
                 public static Splitter Create(IDataView view, int col)
                 {
                     var type = view.Schema[col].Type;
-                    Contracts.Assert(type.IsPrimitive || type.VectorSize > 0);
+                    Contracts.Assert(type is PrimitiveType || type.VectorSize > 0);
                     const int defaultSplitThreshold = 16;
                     if (type.VectorSize <= defaultSplitThreshold)
                         return Utils.MarshalInvoke(CreateCore<int>, type.RawType, view, col);

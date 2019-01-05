@@ -9,18 +9,17 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using Microsoft.ML;
+using Microsoft.ML.Command;
+using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.Command;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Data.Conversion;
-using Microsoft.ML.Runtime.Internal.Utilities;
+using Microsoft.ML.Data.Conversion;
+using Microsoft.ML.Internal.Utilities;
 
 [assembly: LoadableClass(ShowSchemaCommand.Summary, typeof(ShowSchemaCommand), typeof(ShowSchemaCommand.Arguments), typeof(SignatureCommand),
     "Show Schema", ShowSchemaCommand.LoadName, "schema")]
 
-namespace Microsoft.ML.Runtime.Data
+namespace Microsoft.ML.Data
 {
     internal sealed class ShowSchemaCommand : DataCommand.ImplBase<ShowSchemaCommand.Arguments>
     {
@@ -155,7 +154,7 @@ namespace Microsoft.ML.Runtime.Data
                     ColumnType typeNames;
                     if ((typeNames = schema[col].Metadata.Schema.GetColumnOrNull(MetadataUtils.Kinds.SlotNames)?.Type) == null)
                         continue;
-                    if (typeNames.VectorSize != type.VectorSize || !typeNames.ItemType.IsText)
+                    if (typeNames.VectorSize != type.VectorSize || !(typeNames.ItemType is TextType))
                     {
                         Contracts.Assert(false, "Unexpected slot names type");
                         continue;
@@ -213,7 +212,7 @@ namespace Microsoft.ML.Runtime.Data
             Contracts.AssertValue(type);
             Contracts.Assert(!type.IsVector);
 
-            if (!type.IsStandardScalar && !type.IsKey)
+            if (!type.IsStandardScalar() && !type.IsKey)
             {
                 itw.Write(": Can't display value of this type");
                 return;
@@ -253,7 +252,7 @@ namespace Microsoft.ML.Runtime.Data
             Contracts.AssertValue(type);
             Contracts.Assert(type.IsVector);
 
-            if (!type.ItemType.IsStandardScalar && !type.ItemType.IsKey)
+            if (!type.ItemType.IsStandardScalar() && !type.ItemType.IsKey)
             {
                 itw.Write(": Can't display value of this type");
                 return;

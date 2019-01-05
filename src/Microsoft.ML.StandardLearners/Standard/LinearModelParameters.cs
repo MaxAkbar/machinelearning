@@ -2,24 +2,23 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Calibrator;
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Internal.Calibration;
-using Microsoft.ML.Runtime.Internal.Internallearn;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Learners;
-using Microsoft.ML.Runtime.Model;
-using Microsoft.ML.Runtime.Model.Onnx;
-using Microsoft.ML.Runtime.Model.Pfa;
-using Microsoft.ML.Runtime.Numeric;
-using Newtonsoft.Json.Linq;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Microsoft.ML;
+using Microsoft.ML.Calibrator;
+using Microsoft.ML.Data;
+using Microsoft.ML.Internal.Calibration;
+using Microsoft.ML.Internal.Internallearn;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Learners;
+using Microsoft.ML.Model;
+using Microsoft.ML.Model.Onnx;
+using Microsoft.ML.Model.Pfa;
+using Microsoft.ML.Numeric;
+using Newtonsoft.Json.Linq;
 
 // This is for deserialization from a model repository.
 [assembly: LoadableClass(typeof(IPredictorProducing<float>), typeof(LinearBinaryModelParameters), null, typeof(SignatureLoadModel),
@@ -36,7 +35,7 @@ using System.Linq;
     "Poisson Regression Executor",
     PoissonRegressionModelParameters.LoaderSignature)]
 
-namespace Microsoft.ML.Runtime.Learners
+namespace Microsoft.ML.Learners
 {
     public abstract class LinearModelParameters : ModelParametersBase<float>,
         IValueMapper,
@@ -85,10 +84,7 @@ namespace Microsoft.ML.Runtime.Learners
                 return _pred.Weight.Items(all: true).Select(iv => iv.Value).GetEnumerator();
             }
 
-            IEnumerator IEnumerable.GetEnumerator()
-            {
-                return GetEnumerator();
-            }
+            IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
         }
 
         /// <summary> The predictor's feature weight coefficients.</summary>
@@ -506,7 +502,7 @@ namespace Microsoft.ML.Runtime.Learners
             writer.WriteLine(LinearPredictorUtils.LinearModelAsText("Linear Binary Classification Predictor", null, null,
                 in weights, Bias, schema));
 
-            _stats?.SaveText(writer, this, schema, 20);
+            _stats?.SaveText(writer, this, schema.Feature.Value, 20);
         }
 
         ///<inheritdoc/>
@@ -517,7 +513,7 @@ namespace Microsoft.ML.Runtime.Learners
             var weights = Weight;
             List<KeyValuePair<string, object>> results = new List<KeyValuePair<string, object>>();
             LinearPredictorUtils.SaveLinearModelWeightsInKeyValuePairs(in weights, Bias, schema, results);
-            _stats?.SaveSummaryInKeyValuePairs(this, schema, int.MaxValue, results);
+            _stats?.SaveSummaryInKeyValuePairs(this, schema.Feature.Value, int.MaxValue, results);
             return results;
         }
 

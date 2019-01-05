@@ -4,16 +4,6 @@
 
 #pragma warning disable 420 // volatile with Interlocked.CompareExchange
 
-using Microsoft.ML.Core.Data;
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Data.IO;
-using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
-using Microsoft.ML.Transforms.Text;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -21,6 +11,15 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
+using Microsoft.ML.Data.IO;
+using Microsoft.ML.EntryPoints;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
+using Microsoft.ML.Transforms.Text;
 
 [assembly: LoadableClass(StopWordsRemovingTransformer.Summary, typeof(IDataTransform), typeof(StopWordsRemovingTransformer), typeof(StopWordsRemovingTransformer.Arguments), typeof(SignatureDataTransform),
     "Stopwords Remover Transform", "StopWordsRemoverTransform", "StopWordsRemover", "StopWords")]
@@ -541,7 +540,7 @@ namespace Microsoft.ML.Transforms.Text
             public const Language DefaultLanguage = Language.English;
         }
 
-        public static bool IsColumnTypeValid(ColumnType type) => type.ItemType.IsText && type.IsVector;
+        public static bool IsColumnTypeValid(ColumnType type) => type.ItemType is TextType && type.IsVector;
 
         internal const string ExpectedColumnType = "vector of Text type";
 
@@ -583,7 +582,7 @@ namespace Microsoft.ML.Transforms.Text
             {
                 if (!inputSchema.TryFindColumn(colInfo.Input, out var col))
                     throw Host.ExceptSchemaMismatch(nameof(inputSchema), "input", colInfo.Input);
-                if (col.Kind == SchemaShape.Column.VectorKind.Scalar || !col.ItemType.IsText)
+                if (col.Kind == SchemaShape.Column.VectorKind.Scalar || !(col.ItemType is TextType))
                     throw Host.ExceptSchemaMismatch(nameof(inputSchema), "input", colInfo.Input, ExpectedColumnType, col.ItemType.ToString());
                 result[colInfo.Output] = new SchemaShape.Column(colInfo.Output, SchemaShape.Column.VectorKind.VariableVector, TextType.Instance, false);
             }
@@ -773,7 +772,7 @@ namespace Microsoft.ML.Transforms.Text
                 if (!loader.Schema.TryGetColumnIndex(srcCol, out colSrc))
                     throw ch.ExceptUserArg(nameof(Arguments.StopwordsColumn), "Unknown column '{0}'", srcCol);
                 var typeSrc = loader.Schema[colSrc].Type;
-                ch.CheckUserArg(typeSrc.IsText, nameof(Arguments.StopwordsColumn), "Must be a scalar text column");
+                ch.CheckUserArg(typeSrc is TextType, nameof(Arguments.StopwordsColumn), "Must be a scalar text column");
 
                 // Accumulate the stopwords.
                 using (var cursor = loader.GetRowCursor(col => col == colSrc))
@@ -1073,7 +1072,7 @@ namespace Microsoft.ML.Transforms.Text
             {
                 if (!inputSchema.TryFindColumn(colInfo.input, out var col))
                     throw Host.ExceptSchemaMismatch(nameof(inputSchema), "input", colInfo.input);
-                if (col.Kind == SchemaShape.Column.VectorKind.Scalar || !col.ItemType.IsText)
+                if (col.Kind == SchemaShape.Column.VectorKind.Scalar || !(col.ItemType is TextType))
                     throw Host.ExceptSchemaMismatch(nameof(inputSchema), "input", colInfo.input, ExpectedColumnType, col.ItemType.ToString());
                 result[colInfo.output] = new SchemaShape.Column(colInfo.output, SchemaShape.Column.VectorKind.VariableVector, TextType.Instance, false);
             }

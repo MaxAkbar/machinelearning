@@ -4,19 +4,18 @@
 
 #pragma warning disable 420 // volatile with Interlocked.CompareExchange
 
-using Microsoft.ML.Core.Data;
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Transforms.FeatureSelection;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
+using Microsoft.ML.EntryPoints;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Transforms.FeatureSelection;
 
 [assembly: LoadableClass(MutualInformationFeatureSelectingEstimator.Summary, typeof(IDataTransform), typeof(MutualInformationFeatureSelectingEstimator), typeof(MutualInformationFeatureSelectingEstimator.Arguments), typeof(SignatureDataTransform),
     MutualInformationFeatureSelectingEstimator.UserName, "MutualInformationFeatureSelection", "MutualInformationFeatureSelectionTransform", MutualInformationFeatureSelectingEstimator.ShortName)]
@@ -336,7 +335,7 @@ namespace Microsoft.ML.Transforms.FeatureSelection
         {
             // REVIEW: Consider supporting all integer and unsigned types.
             return
-                (0 < type.KeyCount && type.KeyCount < Utils.ArrayMaxSize) || type.IsBool ||
+                (0 < type.KeyCount && type.KeyCount < Utils.ArrayMaxSize) || type is BoolType ||
                 type == NumberType.R4 || type == NumberType.R8 || type == NumberType.I4;
         }
 
@@ -469,7 +468,7 @@ namespace Microsoft.ML.Transforms.FeatureSelection
                     BinDoubles(in tmp, ref labels, _numBins, out min, out lim);
                     _numLabels = lim - min;
                 }
-                else if (labelType.IsBool)
+                else if (labelType is BoolType)
                 {
                     var tmp = default(VBuffer<bool>);
                     trans.GetSingleSlotValue(labelCol, ref tmp);
@@ -546,7 +545,7 @@ namespace Microsoft.ML.Transforms.FeatureSelection
                             BinDoubles(in src, ref dst, _numBins, out min, out lim);
                         });
                 }
-                if (type.ItemType.IsBool)
+                if (type.ItemType is BoolType)
                 {
                     return ComputeMutualInformation(trans, col,
                         (ref VBuffer<bool> src, ref VBuffer<int> dst, out int min, out int lim) =>
@@ -693,7 +692,7 @@ namespace Microsoft.ML.Transforms.FeatureSelection
             /// </summary>
             private static ValueMapper<VBuffer<T>, VBuffer<int>> BinKeys<T>(ColumnType colType)
             {
-                var conv = Runtime.Data.Conversion.Conversions.Instance.GetStandardConversion<T, uint>(colType, NumberType.U4, out bool identity);
+                var conv = Data.Conversion.Conversions.Instance.GetStandardConversion<T, uint>(colType, NumberType.U4, out bool identity);
                 ValueMapper<T, int> mapper;
                 if (identity)
                 {

@@ -2,16 +2,15 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Model;
-using Microsoft.ML.Runtime.RunTests;
-using Microsoft.ML.Runtime.Tools;
-using Microsoft.ML.StaticPipe;
-using Microsoft.ML.Transforms.Conversions;
 using System;
 using System.IO;
 using System.Linq;
+using Microsoft.ML.Data;
+using Microsoft.ML.Model;
+using Microsoft.ML.RunTests;
+using Microsoft.ML.StaticPipe;
+using Microsoft.ML.Tools;
+using Microsoft.ML.Transforms.Conversions;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -62,7 +61,7 @@ namespace Microsoft.ML.Tests.Transformers
         public void KeyToBinaryVectorStatic()
         {
             string dataPath = GetDataPath("breast-cancer.txt");
-            var reader = TextLoader.CreateReader(Env, ctx => (
+            var reader = TextLoaderStatic.CreateReader(Env, ctx => (
                 ScalarString: ctx.LoadText(1),
                 VectorString: ctx.LoadText(1, 4)
             ));

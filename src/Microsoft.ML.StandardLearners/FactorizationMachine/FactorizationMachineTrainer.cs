@@ -2,19 +2,18 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Core.Data;
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.EntryPoints;
-using Microsoft.ML.Runtime.FactorizationMachine;
-using Microsoft.ML.Runtime.Internal.CpuMath;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Training;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Core.Data;
+using Microsoft.ML.Data;
+using Microsoft.ML.EntryPoints;
+using Microsoft.ML.FactorizationMachine;
+using Microsoft.ML.Internal.CpuMath;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Training;
 
 [assembly: LoadableClass(FieldAwareFactorizationMachineTrainer.Summary, typeof(FieldAwareFactorizationMachineTrainer),
     typeof(FieldAwareFactorizationMachineTrainer.Arguments), new[] { typeof(SignatureBinaryClassifierTrainer), typeof(SignatureTrainer) }
@@ -23,7 +22,7 @@ using System.Linq;
 
 [assembly: LoadableClass(typeof(void), typeof(FieldAwareFactorizationMachineTrainer), null, typeof(SignatureEntryPointModule), FieldAwareFactorizationMachineTrainer.LoadName)]
 
-namespace Microsoft.ML.Runtime.FactorizationMachine
+namespace Microsoft.ML.FactorizationMachine
 {
     /*
      Train a field-aware factorization machine using ADAGRAD (an advanced stochastic gradient method). See references below

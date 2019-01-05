@@ -2,19 +2,18 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Data;
-using Microsoft.ML.Runtime;
-using Microsoft.ML.Runtime.CommandLine;
-using Microsoft.ML.Runtime.Data;
-using Microsoft.ML.Runtime.Internal.Internallearn;
-using Microsoft.ML.Runtime.Internal.Utilities;
-using Microsoft.ML.Runtime.Model;
-using Microsoft.ML.Transforms.FeatureSelection;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using Microsoft.ML;
+using Microsoft.ML.CommandLine;
+using Microsoft.ML.Data;
+using Microsoft.ML.Internal.Internallearn;
+using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Model;
+using Microsoft.ML.Transforms.FeatureSelection;
 
 [assembly: LoadableClass(SlotsDroppingTransformer.Summary, typeof(IDataTransform), typeof(SlotsDroppingTransformer), typeof(SlotsDroppingTransformer.Arguments), typeof(SignatureDataTransform),
     SlotsDroppingTransformer.FriendlyName, SlotsDroppingTransformer.LoaderSignature, "DropSlots")]
@@ -476,7 +475,7 @@ namespace Microsoft.ML.Transforms.FeatureSelection
             /// a string, a key, a float or a double.
             /// </summary>
             private static bool IsValidColumnType(ColumnType type)
-                => (0 < type.KeyCount && type.KeyCount < Utils.ArrayMaxSize) || type == NumberType.R4 || type == NumberType.R8 || type.IsText;
+                => (0 < type.KeyCount && type.KeyCount < Utils.ArrayMaxSize) || type == NumberType.R4 || type == NumberType.R8 || type is TextType;
 
             /// <summary>
             /// Computes the types (column and slotnames), the length reduction, categorical feature indices
