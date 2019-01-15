@@ -298,7 +298,7 @@ namespace Microsoft.ML.Data
             Contracts.CheckValue(cursor, nameof(cursor));
             Contracts.Check(0 <= col && col < cursor.Schema.Count);
             ColumnType type = cursor.Schema[col].Type;
-            Contracts.Check(type.IsKey);
+            Contracts.Check(type is KeyType);
             return Utils.MarshalInvoke(GetIsNewGroupDelegateCore<int>, type.RawType, cursor, col);
         }
 
@@ -325,30 +325,6 @@ namespace Microsoft.ML.Data
             };
         }
 
-        [Obsolete("The usages of this appear to be based on a total misunderstanding of what Batch actually is. It is a mechanism " +
-            "to enable sharding and recovery of parallelized data, and has nothing to do with actual data.")]
-        [BestFriend]
-        internal static Func<bool> GetIsNewBatchDelegate(Row cursor, int batchSize)
-        {
-            Contracts.CheckParam(batchSize > 0, nameof(batchSize), "Batch size must be > 0");
-            long lastNewBatchPosition = -1;
-            return () =>
-            {
-                if (cursor.Position % batchSize != 0)
-                    return false;
-
-                // If the cursor just moved to a new batch, we need to return true.
-                if (lastNewBatchPosition != cursor.Position)
-                {
-                    lastNewBatchPosition = cursor.Position;
-                    return true;
-                }
-
-                // The cursor is already in the new batch, if the condition is tested again, we need to return false.
-                return false;
-            };
-        }
-
         public static string TestGetLabelGetter(ColumnType type)
         {
             return TestGetLabelGetter(type, true);
@@ -359,7 +335,7 @@ namespace Microsoft.ML.Data
             if (type == NumberType.R4 || type == NumberType.R8 || type is BoolType)
                 return null;
 
-            if (allowKeys && type.IsKey)
+            if (allowKeys && type is KeyType)
                 return null;
 
             return allowKeys ? "Expected R4, R8, Bool or Key type" : "Expected R4, R8 or Bool type";
@@ -406,9 +382,11 @@ namespace Microsoft.ML.Data
                     };
             }
 
-            Contracts.Check(type.IsKey, "Only floating point number, boolean, and key type values can be used as label.");
+            if (!(type is KeyType keyType))
+                throw Contracts.Except("Only floating point number, boolean, and key type values can be used as label.");
+
             Contracts.Assert(TestGetLabelGetter(type) == null);
-            ulong keyMax = (ulong)type.KeyCount;
+            ulong keyMax = (ulong)keyType.Count;
             if (keyMax == 0)
                 keyMax = ulong.MaxValue;
             var getSrc = RowCursorUtils.GetGetterAs<ulong>(NumberType.U8, cursor, labelIndex);
@@ -431,9 +409,12 @@ namespace Microsoft.ML.Data
                 return cursor.GetGetter<Single>();
             if (type == NumberType.R8 || type is BoolType)
                 return GetVecGetterAs<Single>(NumberType.R4, cursor);
-            Contracts.Check(type.IsKey, "Only floating point number, boolean, and key type values can be used as label.");
+            if (!(type is KeyType keyType))
+            {
+                throw Contracts.Except("Only floating point number, boolean, and key type values can be used as label.");
+            }
             Contracts.Assert(TestGetLabelGetter(type) == null);
-            ulong keyMax = (ulong)type.KeyCount;
+            ulong keyMax = (ulong)keyType.Count;
             if (keyMax == 0)
                 keyMax = ulong.MaxValue;
             var getSrc = RowCursorUtils.GetVecGetterAs<ulong>(NumberType.U8, cursor);
