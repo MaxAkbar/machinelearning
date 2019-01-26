@@ -111,14 +111,14 @@ namespace Microsoft.ML.Data
 
                 // Metadata of tree values.
                 var treeIdMetadataBuilder = new MetadataBuilder();
-                treeIdMetadataBuilder.Add(MetadataUtils.Kinds.SlotNames, MetadataUtils.GetNamesType(treeValueType.VectorSize),
+                treeIdMetadataBuilder.Add(MetadataUtils.Kinds.SlotNames, MetadataUtils.GetNamesType(treeValueType.Size),
                     (ValueGetter<VBuffer<ReadOnlyMemory<char>>>)owner.GetTreeSlotNames);
                 // Add the column of trees' output values
                 schemaBuilder.AddColumn(OutputColumnNames.Trees, treeValueType, treeIdMetadataBuilder.GetMetadata());
 
                 // Metadata of leaf IDs.
                 var leafIdMetadataBuilder = new MetadataBuilder();
-                leafIdMetadataBuilder.Add(MetadataUtils.Kinds.SlotNames, MetadataUtils.GetNamesType(leafIdType.VectorSize),
+                leafIdMetadataBuilder.Add(MetadataUtils.Kinds.SlotNames, MetadataUtils.GetNamesType(leafIdType.Size),
                     (ValueGetter<VBuffer<ReadOnlyMemory<char>>>)owner.GetLeafSlotNames);
                 leafIdMetadataBuilder.Add(MetadataUtils.Kinds.IsNormalized, BoolType.Instance, (ref bool value) => value = true);
                 // Add the column of leaves' IDs where the input example reaches.
@@ -126,7 +126,7 @@ namespace Microsoft.ML.Data
 
                 // Metadata of path IDs.
                 var pathIdMetadataBuilder = new MetadataBuilder();
-                pathIdMetadataBuilder.Add(MetadataUtils.Kinds.SlotNames, MetadataUtils.GetNamesType(pathIdType.VectorSize),
+                pathIdMetadataBuilder.Add(MetadataUtils.Kinds.SlotNames, MetadataUtils.GetNamesType(pathIdType.Size),
                     (ValueGetter<VBuffer<ReadOnlyMemory<char>>>)owner.GetPathSlotNames);
                 pathIdMetadataBuilder.Add(MetadataUtils.Kinds.IsNormalized, BoolType.Instance, (ref bool value) => value = true);
                 // Add the column of encoded paths which the input example passes.
@@ -307,7 +307,7 @@ namespace Microsoft.ML.Data
 
                 private void EnsureCachedPosition()
                 {
-                    _ectx.Check(_input.Position >= 0, "Getter was called on an inactive cursor.");
+                    _ectx.Check(_input.Position >= 0, RowCursorUtils.FetchValueStateError);
                     if (_cachedPosition != _input.Position)
                     {
                         _featureGetter(ref _src);
@@ -586,11 +586,11 @@ namespace Microsoft.ML.Data
                     // be non-null.
                     var vm = predictor as IValueMapper;
                     ch.CheckUserArg(vm != null, nameof(args.TrainedModelFile), "Predictor in model file does not have compatible type");
-                    if (vm.InputType.VectorSize != data.Schema.Feature.Value.Type.VectorSize)
+                    if (vm.InputType.GetVectorSize() != data.Schema.Feature.Value.Type.GetVectorSize())
                     {
                         throw ch.ExceptUserArg(nameof(args.TrainedModelFile),
                             "Predictor in model file expects {0} features, but data has {1} features",
-                            vm.InputType.VectorSize, data.Schema.Feature.Value.Type.VectorSize);
+                            vm.InputType.GetVectorSize(), data.Schema.Feature.Value.Type.GetVectorSize());
                     }
 
                     ISchemaBindableMapper bindable = new TreeEnsembleFeaturizerBindableMapper(env, scorerArgs, predictor);
@@ -651,11 +651,11 @@ namespace Microsoft.ML.Data
                 // be non-null.
                 var vm = predictor as IValueMapper;
                 ch.CheckUserArg(vm != null, nameof(args.PredictorModel), "Predictor does not have compatible type");
-                if (data != null && vm.InputType.VectorSize != data.Schema.Feature.Value.Type.VectorSize)
+                if (data != null && vm.InputType.GetVectorSize() != data.Schema.Feature.Value.Type.GetVectorSize())
                 {
                     throw ch.ExceptUserArg(nameof(args.PredictorModel),
                         "Predictor expects {0} features, but data has {1} features",
-                        vm.InputType.VectorSize, data.Schema.Feature.Value.Type.VectorSize);
+                        vm.InputType.GetVectorSize(), data.Schema.Feature.Value.Type.GetVectorSize());
                 }
 
                 ISchemaBindableMapper bindable = new TreeEnsembleFeaturizerBindableMapper(env, scorerArgs, predictor);
@@ -669,7 +669,7 @@ namespace Microsoft.ML.Data
         {
             // Any key is convertible to ulong, so rather than add special case handling for all possible
             // key-types we just upfront convert it to the most general type (ulong) and work from there.
-            KeyType dstType = new KeyType(DataKind.U8, type.Min, type.Count, type.Contiguous);
+            KeyType dstType = new KeyType(typeof(ulong), type.Count);
             bool identity;
             var converter = Conversions.Instance.GetStandardConversion<TInput, ulong>(type, dstType, out identity);
             var isNa = Conversions.Instance.GetIsNAPredicate<TInput>(type);
@@ -693,7 +693,7 @@ namespace Microsoft.ML.Data
             else
             {
                 ch.Check(type.Count > 0, "Label must be of known cardinality.");
-                int[] permutation = Utils.GetRandomPermutation(RandomUtils.Create(seed), type.Count);
+                int[] permutation = Utils.GetRandomPermutation(RandomUtils.Create(seed), type.GetCountAsInt32(env));
                 mapper =
                     (in TInput src, ref Single dst) =>
                     {

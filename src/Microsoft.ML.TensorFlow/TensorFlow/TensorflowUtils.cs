@@ -40,7 +40,10 @@ namespace Microsoft.ML.Transforms.TensorFlow
 
                 // If the type is not supported in ML.NET then we cannot represent it as a column in an Schema.
                 // We also cannot output it with a TensorFlowTransform, so we skip it.
-                if (mlType == null)
+                // Furthermore, operators which have NumOutputs <= 0 needs to be filtered.
+                // The 'GetTensorShape' method crashes TensorFlow runtime
+                // (https://github.com/dotnet/machinelearning/issues/2156) when the operator has no outputs.
+                if (mlType == null || op.NumOutputs <= 0)
                     continue;
 
                 // Construct the final ML.NET type of a Tensorflow variable.
@@ -101,11 +104,12 @@ namespace Microsoft.ML.Transforms.TensorFlow
         /// and for each one it returns a tuple containing the name, operation type, column type and an array of input node names.
         /// This method is convenient for filtering nodes based on certain criteria, for example, by the operation type.
         /// </summary>
+        /// <param name="env">The environment to use.</param>
         /// <param name="modelPath">Model to load.</param>
         /// <returns></returns>
-        public static IEnumerable<(string, string, ColumnType, string[])> GetModelNodes(string modelPath)
+        public static IEnumerable<(string, string, ColumnType, string[])> GetModelNodes(IHostEnvironment env, string modelPath)
         {
-            var schema = GetModelSchema(new MLContext(), modelPath);
+            var schema = GetModelSchema(env, modelPath);
 
             for (int i = 0; i < schema.Count; i++)
             {
@@ -120,7 +124,7 @@ namespace Microsoft.ML.Transforms.TensorFlow
                 VBuffer<ReadOnlyMemory<char>> inputOps = default;
                 if (metadataType != null)
                 {
-                    Contracts.Assert(metadataType.IsKnownSizeVector && metadataType.ItemType is TextType);
+                    Contracts.Assert(metadataType.IsKnownSizeVector() && metadataType.GetItemType() is TextType);
                     schema[i].Metadata.GetValue(TensorflowUpstreamOperatorsKind, ref inputOps);
                 }
 
@@ -150,20 +154,24 @@ namespace Microsoft.ML.Transforms.TensorFlow
                     return NumberType.R4;
                 case TFDataType.Double:
                     return NumberType.R8;
-                case TFDataType.UInt16:
-                    return NumberType.U2;
                 case TFDataType.UInt8:
                     return NumberType.U1;
+                case TFDataType.UInt16:
+                    return NumberType.U2;
                 case TFDataType.UInt32:
                     return NumberType.U4;
                 case TFDataType.UInt64:
                     return NumberType.U8;
+                case TFDataType.Int8:
+                    return NumberType.I1;
                 case TFDataType.Int16:
                     return NumberType.I2;
                 case TFDataType.Int32:
                     return NumberType.I4;
                 case TFDataType.Int64:
                     return NumberType.I8;
+                case TFDataType.Bool:
+                    return BoolType.Instance;
                 default:
                     return null;
             }
@@ -362,9 +370,11 @@ namespace Microsoft.ML.Transforms.TensorFlow
                 case TFDataType.UInt16:
                 case TFDataType.UInt32:
                 case TFDataType.UInt64:
+                case TFDataType.Int8:
                 case TFDataType.Int16:
                 case TFDataType.Int32:
                 case TFDataType.Int64:
+                case TFDataType.Bool:
                     return true;
                 default:
                     return false;

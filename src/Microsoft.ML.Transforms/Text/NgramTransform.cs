@@ -301,21 +301,21 @@ namespace Microsoft.ML.Transforms.Text
             // i in _counts counts how many (i+1)-grams are in the pool for column iinfo.
             var counts = new int[columns.Length][];
             var ngramMaps = new SequencePool[columns.Length];
-            var activeInput = new bool[trainingData.Schema.Count];
+            var activeCols = new List<Schema.Column>();
             var srcTypes = new ColumnType[columns.Length];
             var srcCols = new int[columns.Length];
             for (int iinfo = 0; iinfo < columns.Length; iinfo++)
             {
                 trainingData.Schema.TryGetColumnIndex(columns[iinfo].Input, out srcCols[iinfo]);
                 srcTypes[iinfo] = trainingData.Schema[srcCols[iinfo]].Type;
-                activeInput[srcCols[iinfo]] = true;
+                activeCols.Add(trainingData.Schema[srcCols[iinfo]]);
             }
-            using (var cursor = trainingData.GetRowCursor(col => activeInput[col]))
+            using (var cursor = trainingData.GetRowCursor(activeCols))
             using (var pch = env.StartProgressChannel("Building n-gram dictionary"))
             {
                 for (int iinfo = 0; iinfo < columns.Length; iinfo++)
                 {
-                    env.Assert(srcTypes[iinfo].IsVector && srcTypes[iinfo].ItemType is KeyType);
+                    env.Assert(srcTypes[iinfo] is VectorType vectorType && vectorType.ItemType is KeyType);
                     var ngramLength = columns[iinfo].NgramLength;
                     var skipLength = columns[iinfo].SkipLength;
 
@@ -346,7 +346,7 @@ namespace Microsoft.ML.Transforms.Text
                     for (int iinfo = 0; iinfo < columns.Length; iinfo++)
                     {
                         getters[iinfo](ref src[iinfo]);
-                        var keyCount = (uint)srcTypes[iinfo].ItemType.GetKeyCount();
+                        var keyCount = (uint)srcTypes[iinfo].GetItemType().GetKeyCount();
                         if (keyCount == 0)
                             keyCount = uint.MaxValue;
                         if (!infoFull[iinfo])
@@ -581,7 +581,7 @@ namespace Microsoft.ML.Transforms.Text
 
             private void AddMetadata(int iinfo, MetadataBuilder builder)
             {
-                if (InputSchema[_srcCols[iinfo]].HasKeyValues(_srcTypes[iinfo].ItemType.GetKeyCount()))
+                if (InputSchema[_srcCols[iinfo]].HasKeyValues(_srcTypes[iinfo].GetItemType()))
                 {
                     ValueGetter<VBuffer<ReadOnlyMemory<char>>> getter = (ref VBuffer<ReadOnlyMemory<char>> dst) =>
                     {
@@ -595,14 +595,14 @@ namespace Microsoft.ML.Transforms.Text
 
             private void GetSlotNames(int iinfo, int size, ref VBuffer<ReadOnlyMemory<char>> dst)
             {
+                var itemType = _srcTypes[iinfo].GetItemType();
                 Host.Assert(0 <= iinfo && iinfo < _parent.ColumnPairs.Length);
-
-                var keyCount = _srcTypes[iinfo].ItemType.GetKeyCount();
-                Host.Assert(InputSchema[_srcCols[iinfo]].HasKeyValues(keyCount));
+                Host.Assert(InputSchema[_srcCols[iinfo]].HasKeyValues(itemType));
 
                 var unigramNames = new VBuffer<ReadOnlyMemory<char>>();
 
                 // Get the key values of the unigrams.
+                var keyCount = itemType.GetKeyCountAsInt32(Host);
                 InputSchema[_srcCols[iinfo]].Metadata.GetValue(MetadataUtils.Kinds.KeyValues, ref unigramNames);
                 Host.Check(unigramNames.Length == keyCount);
 
@@ -677,7 +677,7 @@ namespace Microsoft.ML.Transforms.Text
                 var src = default(VBuffer<uint>);
                 var bldr = new NgramBufferBuilder(_parent._transformInfos[iinfo].NgramLength, _parent._transformInfos[iinfo].SkipLength,
                     _parent._ngramMaps[iinfo].Count, GetNgramIdFinder(iinfo));
-                var keyCount = (uint)_srcTypes[iinfo].ItemType.GetKeyCount();
+                var keyCount = (uint)_srcTypes[iinfo].GetItemType().GetKeyCount();
                 if (keyCount == 0)
                     keyCount = uint.MaxValue;
 
@@ -838,12 +838,12 @@ namespace Microsoft.ML.Transforms.Text
 
         internal static bool IsColumnTypeValid(ColumnType type)
         {
-            if (!type.IsVector)
+            if (!(type is VectorType vectorType))
                 return false;
-            if (!(type.ItemType is KeyType itemKeyType))
+            if (!(vectorType.ItemType is KeyType itemKeyType))
                 return false;
             // Can only accept key types that can be converted to U4.
-            if (itemKeyType.Count == 0 && type.ItemType.RawKind > DataKind.U4)
+            if (itemKeyType.Count == 0 && !NgramUtils.IsValidNgramRawType(itemKeyType.RawType))
                 return false;
             return true;
         }
@@ -855,7 +855,7 @@ namespace Microsoft.ML.Transforms.Text
             if (!col.IsKey)
                 return false;
             // Can only accept key types that can be converted to U4.
-            if (col.ItemType.RawKind > DataKind.U4)
+            if (!NgramUtils.IsValidNgramRawType(col.ItemType.RawType))
                 return false;
             return true;
         }

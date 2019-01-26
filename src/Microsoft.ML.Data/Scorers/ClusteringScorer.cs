@@ -101,7 +101,8 @@ namespace Microsoft.ML.Data
 
             long cachedPosition = -1;
             VBuffer<Float> score = default(VBuffer<Float>);
-            int scoreLength = Bindings.PredColType.GetKeyCount();
+            int keyCount = Bindings.PredColType is KeyType key ? key.GetCountAsInt32(Host) : 0;
+            int scoreLength = keyCount;
 
             ValueGetter<uint> predFn =
                 (ref uint dst) =>
@@ -134,12 +135,14 @@ namespace Microsoft.ML.Data
 
         private static ColumnType GetPredColType(ColumnType scoreType, ISchemaBoundRowMapper mapper)
         {
-            return new KeyType(DataKind.U4, 0, scoreType.VectorSize);
+            return new KeyType(typeof(uint), scoreType.GetVectorSize());
         }
 
         private static bool OutputTypeMatches(ColumnType scoreType)
         {
-            return scoreType.IsKnownSizeVector && scoreType.ItemType == NumberType.Float;
+            return scoreType is VectorType vectorType
+                && vectorType.IsKnownSize
+                && vectorType.ItemType == NumberType.Float;
         }
     }
 }
