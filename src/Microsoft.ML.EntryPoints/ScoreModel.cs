@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
@@ -19,7 +20,7 @@ namespace Microsoft.ML.EntryPoints
     /// (those where the user-defined scorer settings are necessary to identify the scorer). We could resolve this by
     /// adding a sub-component for extra scorer args, or by creating specialized EPs for these scenarios.
     /// </summary>
-    public static partial class ScoreModel
+    internal static partial class ScoreModel
     {
         public sealed class Input
         {
