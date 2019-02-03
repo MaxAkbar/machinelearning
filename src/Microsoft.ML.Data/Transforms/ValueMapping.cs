@@ -33,10 +33,7 @@ using Microsoft.ML.Transforms.Conversions;
 
 namespace Microsoft.ML.Transforms.Conversions
 {
-    /// <summary>
-    /// The ValueMappingEstimator is a 1-1 mapping from a key to value. This particular class load the mappings from an <see cref="IDataView"/>.
-    /// This gives user the flexibility to load the mapping from file instead of using IEnumerable in <see cref="ValueMappingEstimator{TKey, TValue}"/>
-    /// </summary>
+    /// <include file='doc.xml' path='doc/members/member[@name="ValueMappingEstimator"]/*' />
     public class ValueMappingEstimator : TrivialEstimator<ValueMappingTransformer>
     {
         private readonly (string outputColumnName, string inputColumnName)[] _columns;
@@ -87,11 +84,7 @@ namespace Microsoft.ML.Transforms.Conversions
         }
     }
 
-    /// <summary>
-    /// The ValueMappingEstimator is a 1-1 mapping from a key to value. The key type and value type are specified
-    /// through TKey and TValue. TKey is always a scalar. TValue can be either a scalar or an array (array is only possible when input is scalar).
-    /// The mapping is specified, not trained by providing a list of keys and a list of values.
-    /// </summary>
+    /// <include file='doc.xml' path='doc/members/member[@name="ValueMappingEstimator"]/*' />
     /// <typeparam name="TKey">Specifies the key type.</typeparam>
     /// <typeparam name="TValue">Specifies the value type.</typeparam>
     public sealed class ValueMappingEstimator<TKey, TValue> : ValueMappingEstimator
@@ -302,6 +295,7 @@ namespace Microsoft.ML.Transforms.Conversions
         }
     }
 
+    /// <include file='doc.xml' path='doc/members/member[@name="ValueMappingEstimator"]/*' />
     public class ValueMappingTransformer : OneToOneTransformerBase
     {
         internal const string Summary = "Maps text values columns to new columns using a map dataset.";
@@ -364,8 +358,8 @@ namespace Microsoft.ML.Transforms.Conversions
 
         internal sealed class Arguments
         {
-            [Argument(ArgumentType.Multiple | ArgumentType.Required, HelpText = "New column definition(s) (optional form: name:src)", ShortName = "col", SortOrder = 1)]
-            public Column[] Column;
+            [Argument(ArgumentType.Multiple | ArgumentType.Required, HelpText = "New column definition(s) (optional form: name:src)", Name = "Column", ShortName = "col", SortOrder = 1)]
+            public Column[] Columns;
 
             [Argument(ArgumentType.AtMostOnce, IsInputFileName = true, HelpText = "The data file containing the terms", ShortName = "data", SortOrder = 2)]
             public string DataFile;
@@ -591,7 +585,7 @@ namespace Microsoft.ML.Transforms.Conversions
                         valueColumn = new TextLoader.Column(valueColumnName, DataKind.TXT, 1);
                         var txtArgs = new TextLoader.Arguments()
                         {
-                            Column = new TextLoader.Column[]
+                            Columns = new TextLoader.Column[]
                             {
                                 keyColumn,
                                 valueColumn
@@ -618,7 +612,7 @@ namespace Microsoft.ML.Transforms.Conversions
                         env,
                         new TextLoader.Arguments()
                         {
-                            Column = new TextLoader.Column[]
+                            Columns = new TextLoader.Column[]
                             {
                                 keyColumn,
                                 valueColumn
@@ -633,7 +627,7 @@ namespace Microsoft.ML.Transforms.Conversions
             env.Assert(loader.Schema.TryGetColumnIndex(valueColumnName, out int valueColumnIndex));
 
             ValueMappingTransformer transformer = null;
-            (string outputColumnName, string inputColumnName)[] columns = args.Column.Select(x => (x.Name, x.Source)).ToArray();
+            (string outputColumnName, string inputColumnName)[] columns = args.Columns.Select(x => (x.Name, x.Source)).ToArray();
             transformer = new ValueMappingTransformer(env, loader, keyColumnName, valueColumnName, columns);
             return transformer.MakeDataTransform(input);
         }

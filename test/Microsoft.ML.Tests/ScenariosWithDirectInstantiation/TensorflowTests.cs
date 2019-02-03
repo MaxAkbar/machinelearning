@@ -433,7 +433,7 @@ namespace Microsoft.ML.Scenarios
 
                 var pipe = mlContext.Transforms.Categorical.OneHotEncoding("OneHotLabel", "Label")
                     .Append(mlContext.Transforms.Normalize(new NormalizingEstimator.MinMaxColumn("Features", "Placeholder")))
-                    .Append(new TensorFlowEstimator(mlContext, new TensorFlowTransformer.Arguments()
+                    .Append(mlContext.Transforms.TensorFlow(new TensorFlowTransformer.Options()
                     {
                         ModelLocation = model_location,
                         InputColumns = new[] { "Features" },
@@ -449,7 +449,7 @@ namespace Microsoft.ML.Scenarios
                         ReTrain = true
                     }))
                     .Append(mlContext.Transforms.Concatenate("Features", "Prediction"))
-                    .Append(mlContext.Transforms.Conversion.MapValueToKey("KeyLabel","Label", maxNumTerms: 10))
+                    .Append(mlContext.Transforms.Conversion.MapValueToKey("KeyLabel","Label", maxNumKeys: 10))
                     .Append(mlContext.MulticlassClassification.Trainers.LightGbm("KeyLabel", "Features"));
 
                 var trainedModel = pipe.Fit(trainData);
@@ -547,7 +547,7 @@ namespace Microsoft.ML.Scenarios
                 }
 
                 var pipe = mlContext.Transforms.CopyColumns(("Features", "Placeholder"))
-                    .Append(new TensorFlowEstimator(mlContext, new TensorFlowTransformer.Arguments()
+                    .Append(new TensorFlowEstimator(mlContext, new TensorFlowTransformer.Options()
                     {
                         ModelLocation = modelLocation,
                         InputColumns = new[] { "Features" },

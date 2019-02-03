@@ -76,7 +76,7 @@ namespace Microsoft.ML.EntryPoints
                 viewTrain = ColumnConcatenatingTransformer.Create(host,
                     new ColumnConcatenatingTransformer.TaggedArguments()
                     {
-                        Column =
+                        Columns =
                             new[] { new ColumnConcatenatingTransformer.TaggedColumn() { Name = nameFeat, Source = concatNames.ToArray() } }
                     },
                     viewTrain);
@@ -99,10 +99,10 @@ namespace Microsoft.ML.EntryPoints
                     .Transform(viewTrain);
 
                 viewTrain = ValueToKeyMappingTransformer.Create(host,
-                    new ValueToKeyMappingTransformer.Arguments()
+                    new ValueToKeyMappingTransformer.Options()
                     {
-                        Column = ktv
-                            .Select(c => new ValueToKeyMappingTransformer.Column() { Name = c.Name, Source = c.Name, Terms = GetTerms(viewTrain, c.InputColumnName) })
+                        Columns = ktv
+                            .Select(c => new ValueToKeyMappingTransformer.Column() { Name = c.Name, Source = c.Name, Term = GetTerms(viewTrain, c.InputColumnName) })
                             .ToArray(),
                         TextKeyValues = true
                     },
@@ -243,16 +243,16 @@ namespace Microsoft.ML.EntryPoints
                 return new CommonOutputs.TransformOutput { Model = new TransformModelImpl(env, nop, input.Data), OutputData = nop };
             }
 
-            var args = new ValueToKeyMappingTransformer.Arguments()
+            var args = new ValueToKeyMappingTransformer.Options()
             {
-                Column = new[]
+                Columns = new[]
                 {
                     new ValueToKeyMappingTransformer.Column()
                     {
                         Name = input.LabelColumn,
                         Source = input.LabelColumn,
                         TextKeyValues = input.TextKeyValues,
-                        Sort = ValueToKeyMappingTransformer.SortOrder.Value
+                        Sort = ValueToKeyMappingEstimator.SortOrder.Value
                     }
                 }
             };
@@ -302,7 +302,7 @@ namespace Microsoft.ML.EntryPoints
 
             var args = new TypeConvertingTransformer.Arguments()
             {
-                Column = new[]
+                Columns = new[]
                 {
                     new TypeConvertingTransformer.Column()
                     {

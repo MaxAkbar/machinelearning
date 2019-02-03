@@ -57,7 +57,7 @@ namespace Microsoft.ML.Tests
 
             var loader = new TextLoader(Env, new TextLoader.Arguments
             {
-                Column = new[]{
+                Columns = new[]{
                     new TextLoader.Column("float1", DataKind.R4, 9),
                     new TextLoader.Column("float4", DataKind.R4, new[]{new TextLoader.Range(9), new TextLoader.Range(10), new TextLoader.Range(11), new TextLoader.Range(12) }),
                     new TextLoader.Column("double1", DataKind.R8, 9),
@@ -71,13 +71,13 @@ namespace Microsoft.ML.Tests
             }, new MultiFileSource(dataPath));
 
             var pipe = new ValueToKeyMappingEstimator(Env, new[]{
-                    new ValueToKeyMappingTransformer.ColumnInfo("TermFloat1", "float1"),
-                    new ValueToKeyMappingTransformer.ColumnInfo("TermFloat4", "float4"),
-                    new ValueToKeyMappingTransformer.ColumnInfo("TermDouble1", "double1"),
-                    new ValueToKeyMappingTransformer.ColumnInfo("TermDouble4", "double4"),
-                    new ValueToKeyMappingTransformer.ColumnInfo("TermInt1", "int1"),
-                    new ValueToKeyMappingTransformer.ColumnInfo("TermText1", "text1"),
-                    new ValueToKeyMappingTransformer.ColumnInfo("TermText2", "text2")
+                    new ValueToKeyMappingEstimator.ColumnInfo("TermFloat1", "float1"),
+                    new ValueToKeyMappingEstimator.ColumnInfo("TermFloat4", "float4"),
+                    new ValueToKeyMappingEstimator.ColumnInfo("TermDouble1", "double1"),
+                    new ValueToKeyMappingEstimator.ColumnInfo("TermDouble4", "double4"),
+                    new ValueToKeyMappingEstimator.ColumnInfo("TermInt1", "int1"),
+                    new ValueToKeyMappingEstimator.ColumnInfo("TermText1", "text1"),
+                    new ValueToKeyMappingEstimator.ColumnInfo("TermText2", "text2")
                 });
             var data = loader.Read(dataPath);
             data = TakeFilter.Create(Env, data, 10);
@@ -102,9 +102,9 @@ namespace Microsoft.ML.Tests
             var stringData = new[] { new TestClassDifferentTypes { A = "1", B = "c", C = "b" } };
             var dataView = ML.Data.ReadFromEnumerable(data);
             var pipe = new ValueToKeyMappingEstimator(Env, new[]{
-                   new ValueToKeyMappingTransformer.ColumnInfo("TermA", "A"),
-                   new ValueToKeyMappingTransformer.ColumnInfo("TermB", "B"),
-                   new ValueToKeyMappingTransformer.ColumnInfo("TermC", "C")
+                   new ValueToKeyMappingEstimator.ColumnInfo("TermA", "A"),
+                   new ValueToKeyMappingEstimator.ColumnInfo("TermB", "B"),
+                   new ValueToKeyMappingEstimator.ColumnInfo("TermC", "C")
                 });
             var invalidData = ML.Data.ReadFromEnumerable(xydata);
             var validFitNotValidTransformData = ML.Data.ReadFromEnumerable(stringData);
@@ -117,9 +117,9 @@ namespace Microsoft.ML.Tests
             var data = new[] { new TestClass() { A = 1, B = 2, C = 3, }, new TestClass() { A = 4, B = 5, C = 6 } };
             var dataView = ML.Data.ReadFromEnumerable(data);
             var est = new ValueToKeyMappingEstimator(Env, new[]{
-                    new ValueToKeyMappingTransformer.ColumnInfo("TermA", "A"),
-                    new ValueToKeyMappingTransformer.ColumnInfo("TermB", "B"),
-                    new ValueToKeyMappingTransformer.ColumnInfo("TermC", "C")
+                    new ValueToKeyMappingEstimator.ColumnInfo("TermA", "A"),
+                    new ValueToKeyMappingEstimator.ColumnInfo("TermB", "B"),
+                    new ValueToKeyMappingEstimator.ColumnInfo("TermC", "C")
                 });
             var transformer = est.Fit(dataView);
             var result = transformer.Transform(dataView);
@@ -139,7 +139,7 @@ namespace Microsoft.ML.Tests
             var data = new[] { new TestMetaClass() { Term = "A", NotUsed = 1 }, new TestMetaClass() { Term = "B" }, new TestMetaClass() { Term = "C" } };
             var dataView = ML.Data.ReadFromEnumerable(data);
             var termEst = new ValueToKeyMappingEstimator(Env, new[] {
-                    new ValueToKeyMappingTransformer.ColumnInfo("T", "Term") });
+                    new ValueToKeyMappingEstimator.ColumnInfo("T", "Term") });
 
             var termTransformer = termEst.Fit(dataView);
             var result = termTransformer.Transform(dataView);

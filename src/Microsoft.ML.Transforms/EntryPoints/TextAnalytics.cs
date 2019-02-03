@@ -66,7 +66,7 @@ namespace Microsoft.ML.Transforms.Text
             Desc = ValueToKeyMappingTransformer.Summary,
             UserName = ValueToKeyMappingTransformer.UserName,
             ShortName = ValueToKeyMappingTransformer.LoaderSignature)]
-        public static CommonOutputs.TransformOutput TermTransform(IHostEnvironment env, ValueToKeyMappingTransformer.Arguments input)
+        public static CommonOutputs.TransformOutput TermTransform(IHostEnvironment env, ValueToKeyMappingTransformer.Options input)
         {
             var h = EntryPointUtils.CheckArgsAndCreateHost(env, "TermTransform", input);
             var xf = ValueToKeyMappingTransformer.Create(h, input, input.Data);
@@ -120,7 +120,7 @@ namespace Microsoft.ML.Transforms.Text
             env.CheckValue(input, nameof(input));
 
             var h = EntryPointUtils.CheckArgsAndCreateHost(env, "LightLda", input);
-            var cols = input.Column.Select(colPair => new LatentDirichletAllocationTransformer.ColumnInfo(colPair, input)).ToArray();
+            var cols = input.Columns.Select(colPair => new LatentDirichletAllocationTransformer.ColumnInfo(colPair, input)).ToArray();
             var est = new LatentDirichletAllocationEstimator(h, cols);
             var view = est.Fit(input.Data).Transform(input.Data);
 

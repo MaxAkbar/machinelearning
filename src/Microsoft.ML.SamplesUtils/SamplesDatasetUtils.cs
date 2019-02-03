@@ -118,6 +118,23 @@ namespace Microsoft.ML.SamplesUtils
             return data;
         }
 
+        public class SampleTemperatureData
+        {
+            public DateTime Date {get; set; }
+            public float Temperature { get; set; }
+        }
+
+        public static IEnumerable<SampleTemperatureData> GetSampleTemperatureData()
+        {
+            var data = new List<SampleTemperatureData>();
+            data.Add(new SampleTemperatureData { Date = new DateTime(2012,1,1), Temperature = 39.0F });
+            data.Add(new SampleTemperatureData { Date = new DateTime(2012,1,2), Temperature = 82.0F });
+            data.Add(new SampleTemperatureData { Date = new DateTime(2012,1,3), Temperature = 75.0F });
+            data.Add(new SampleTemperatureData { Date = new DateTime(2012,1,4), Temperature = 67.0F });
+            data.Add(new SampleTemperatureData { Date = new DateTime(2012,1,5), Temperature = 75.0F });
+            return data;
+        }
+
         /// <summary>
         /// Represents the column of the infertility dataset.
         /// </summary>
@@ -168,7 +185,7 @@ namespace Microsoft.ML.SamplesUtils
             data.Add(new SampleInfertData
             {
                 RowNum = 2,
-                Education = "0-5yrs",
+                Education = "12+yrs",
                 Age = 39,
                 Parity = 6,
                 Induced = 2,
@@ -262,6 +279,37 @@ namespace Microsoft.ML.SamplesUtils
                     var value = (float)rnd.NextDouble();
                     // Positive class gets larger feature value.
                     if (sample.Label)
+                        value += 0.2f;
+                    sample.Features[j] = value;
+                }
+
+                data.Add(sample);
+            }
+            return data;
+        }
+
+        public class FloatLabelFloatFeatureVectorSample
+        {
+            public float Label;
+
+            [VectorType(_simpleBinaryClassSampleFeatureLength)]
+            public float[] Features;
+        }
+
+        public static  IEnumerable<FloatLabelFloatFeatureVectorSample> GenerateFloatLabelFloatFeatureVectorSamples(int exampleCount)
+        {
+            var rnd = new Random(0);
+            var data = new List<FloatLabelFloatFeatureVectorSample>();
+            for (int i = 0; i < exampleCount; ++i)
+            {
+                // Initialize an example with a random label and an empty feature vector.
+                var sample = new FloatLabelFloatFeatureVectorSample() { Label = rnd.Next() % 2, Features = new float[_simpleBinaryClassSampleFeatureLength] };
+                // Fill feature vector according the assigned label.
+                for (int j = 0; j < _simpleBinaryClassSampleFeatureLength; ++j)
+                {
+                    var value = (float)rnd.NextDouble();
+                    // Positive class gets larger feature value.
+                    if (sample.Label == 0)
                         value += 0.2f;
                     sample.Features[j] = value;
                 }

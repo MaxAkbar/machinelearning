@@ -127,9 +127,9 @@ namespace Microsoft.ML.Tests
             var data = new[] { new TestMetaClass() { Term = "A", NotUsed = 1 }, new TestMetaClass() { Term = "B" }, new TestMetaClass() { Term = "C" } };
             var env = new MLContext();
             var dataView = env.Data.ReadFromEnumerable(data);
-            var term = ValueToKeyMappingTransformer.Create(env, new ValueToKeyMappingTransformer.Arguments()
+            var term = ValueToKeyMappingTransformer.Create(env, new ValueToKeyMappingTransformer.Options()
             {
-                Column = new[] { new ValueToKeyMappingTransformer.Column() { Source = "Term", Name = "T" } }
+                Columns = new[] { new ValueToKeyMappingTransformer.Column() { Source = "Term", Name = "T" } }
             }, dataView);
             var est = new ColumnCopyingEstimator(env, "T1", "T");
             var transformer = est.Fit(term);
