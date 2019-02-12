@@ -9,7 +9,6 @@ using Microsoft.ML.Data;
 using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Internallearn;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Learners;
 using Microsoft.ML.Numeric;
 
 // TODO: Check if it works properly if Averaged is set to false
@@ -64,7 +63,7 @@ namespace Microsoft.ML.Trainers.Online
 
     public abstract class AveragedLinearTrainer<TTransformer, TModel> : OnlineLinearTrainer<TTransformer, TModel>
         where TTransformer : ISingleFeaturePredictionTransformer<TModel>
-        where TModel : IPredictor
+        where TModel : class
     {
         protected readonly new AveragedLinearArguments Args;
         protected IScalarOutputLoss LossFunction;

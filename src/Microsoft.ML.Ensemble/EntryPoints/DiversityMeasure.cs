@@ -2,7 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.ML.Ensemble.EntryPoints;
+using Microsoft.ML.Ensemble;
 using Microsoft.ML.Ensemble.Selector;
 using Microsoft.ML.Ensemble.Selector.DiversityMeasure;
 using Microsoft.ML.EntryPoints;
@@ -11,22 +11,22 @@ using Microsoft.ML.EntryPoints;
 [assembly: EntryPointModule(typeof(RegressionDisagreementDiversityFactory))]
 [assembly: EntryPointModule(typeof(MultiDisagreementDiversityFactory))]
 
-namespace Microsoft.ML.Ensemble.EntryPoints
+namespace Microsoft.ML.Ensemble
 {
     [TlcModule.Component(Name = DisagreementDiversityMeasure.LoadName, FriendlyName = DisagreementDiversityMeasure.UserName)]
-    public sealed class DisagreementDiversityFactory : ISupportBinaryDiversityMeasureFactory
+    internal sealed class DisagreementDiversityFactory : ISupportBinaryDiversityMeasureFactory
     {
         public IBinaryDiversityMeasure CreateComponent(IHostEnvironment env) => new DisagreementDiversityMeasure();
     }
 
     [TlcModule.Component(Name = RegressionDisagreementDiversityMeasure.LoadName, FriendlyName = DisagreementDiversityMeasure.UserName)]
-    public sealed class RegressionDisagreementDiversityFactory : ISupportRegressionDiversityMeasureFactory
+    internal sealed class RegressionDisagreementDiversityFactory : ISupportRegressionDiversityMeasureFactory
     {
         public IRegressionDiversityMeasure CreateComponent(IHostEnvironment env) => new RegressionDisagreementDiversityMeasure();
     }
 
     [TlcModule.Component(Name = MultiDisagreementDiversityMeasure.LoadName, FriendlyName = DisagreementDiversityMeasure.UserName)]
-    public sealed class MultiDisagreementDiversityFactory : ISupportMulticlassDiversityMeasureFactory
+    internal sealed class MultiDisagreementDiversityFactory : ISupportMulticlassDiversityMeasureFactory
     {
         public IMulticlassDiversityMeasure CreateComponent(IHostEnvironment env) => new MultiDisagreementDiversityMeasure();
     }

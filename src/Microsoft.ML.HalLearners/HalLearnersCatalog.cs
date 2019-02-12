@@ -2,11 +2,9 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using System;
 using Microsoft.ML.Data;
 using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Trainers.HalLearners;
-using Microsoft.ML.Trainers.SymSgd;
 using Microsoft.ML.Transforms.Projections;
 
 namespace Microsoft.ML
@@ -112,10 +110,10 @@ namespace Microsoft.ML
         /// </format>
         /// </example>
         public static VectorWhiteningEstimator VectorWhiten(this TransformsCatalog.ProjectionTransforms catalog, string outputColumnName, string inputColumnName = null,
-            WhiteningKind kind = VectorWhiteningTransformer.Defaults.Kind,
-            float eps = VectorWhiteningTransformer.Defaults.Eps,
-            int maxRows = VectorWhiteningTransformer.Defaults.MaxRows,
-            int pcaNum = VectorWhiteningTransformer.Defaults.PcaNum)
+            WhiteningKind kind = VectorWhiteningEstimator.Defaults.Kind,
+            float eps = VectorWhiteningEstimator.Defaults.Eps,
+            int maxRows = VectorWhiteningEstimator.Defaults.MaxRows,
+            int pcaNum = VectorWhiteningEstimator.Defaults.PcaNum)
                 => new VectorWhiteningEstimator(CatalogUtils.GetEnvironment(catalog), outputColumnName, inputColumnName, kind, eps, maxRows, pcaNum);
 
         /// <summary>
@@ -124,7 +122,7 @@ namespace Microsoft.ML
         /// </summary>
         /// <param name="catalog">The transform's catalog.</param>
         /// <param name="columns">Describes the parameters of the whitening process for each column pair.</param>
-        public static VectorWhiteningEstimator VectorWhiten(this TransformsCatalog.ProjectionTransforms catalog, params VectorWhiteningTransformer.ColumnInfo[] columns)
+        public static VectorWhiteningEstimator VectorWhiten(this TransformsCatalog.ProjectionTransforms catalog, params VectorWhiteningEstimator.ColumnInfo[] columns)
             => new VectorWhiteningEstimator(CatalogUtils.GetEnvironment(catalog), columns);
 
     }

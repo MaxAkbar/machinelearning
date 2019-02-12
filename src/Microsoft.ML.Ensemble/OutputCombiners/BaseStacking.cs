@@ -15,7 +15,7 @@ using Microsoft.ML.Training;
 
 namespace Microsoft.ML.Ensemble.OutputCombiners
 {
-    internal abstract class BaseStacking<TOutput> : IStackingTrainer<TOutput>
+    internal abstract class BaseStacking<TOutput> : IStackingTrainer<TOutput>, ICanSaveModel
     {
         public abstract class ArgumentsBase
         {
@@ -67,7 +67,7 @@ namespace Microsoft.ML.Ensemble.OutputCombiners
             CheckMeta();
         }
 
-        public void Save(ModelSaveContext ctx)
+        void ICanSaveModel.Save(ModelSaveContext ctx)
         {
             Host.Check(Meta != null, "Can't save an untrained Stacking combiner");
             Host.CheckValue(ctx, nameof(ctx));
@@ -122,7 +122,7 @@ namespace Microsoft.ML.Ensemble.OutputCombiners
                 throw Contracts.Except("Stacking predictor output type is unsupported: {0}", ivm.OutputType);
         }
 
-        public void Train(List<FeatureSubsetModel<IPredictorProducing<TOutput>>> models, RoleMappedData data, IHostEnvironment env)
+        public void Train(List<FeatureSubsetModel<TOutput>> models, RoleMappedData data, IHostEnvironment env)
         {
             Contracts.CheckValue(env, nameof(env));
             var host = env.Register(Stacking.LoadName);

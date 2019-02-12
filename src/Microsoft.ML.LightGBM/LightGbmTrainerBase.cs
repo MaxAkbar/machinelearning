@@ -8,7 +8,7 @@ using Microsoft.ML.Core.Data;
 using Microsoft.ML.Data;
 using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Trainers.FastTree.Internal;
+using Microsoft.ML.Trainers.FastTree;
 using Microsoft.ML.Training;
 
 namespace Microsoft.ML.LightGBM
@@ -29,7 +29,7 @@ namespace Microsoft.ML.LightGBM
     /// </summary>
     public abstract class LightGbmTrainerBase<TOutput, TTransformer, TModel> : TrainerEstimatorBaseWithGroupId<TTransformer, TModel>
         where TTransformer : ISingleFeaturePredictionTransformer<TModel>
-        where TModel : IPredictorProducing<TOutput>
+        where TModel : class
     {
         private sealed class CategoricalMetaData
         {

@@ -16,7 +16,6 @@ using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Calibration;
 using Microsoft.ML.Internal.Internallearn;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Learners;
 using Microsoft.ML.Model;
 using Microsoft.ML.Model.Pfa;
 using Microsoft.ML.Trainers;
@@ -84,7 +83,7 @@ namespace Microsoft.ML.Trainers
         /// <param name="imputeMissingLabelsAsNegative">Whether to treat missing labels as having negative labels, instead of keeping them missing.</param>
         /// <param name="maxCalibrationExamples">Number of instances to train the calibrator.</param>
         /// <param name="useProbabilities">Use probabilities (vs. raw outputs) to identify top-score category.</param>
-        public Ova(IHostEnvironment env,
+        internal Ova(IHostEnvironment env,
             TScalarTrainer binaryEstimator,
             string labelColumn = DefaultColumnNames.Label,
             bool imputeMissingLabelsAsNegative = false,
@@ -163,7 +162,7 @@ namespace Microsoft.ML.Trainers
             }
             if (lab.Type == NumberType.R8)
             {
-                Double key = cls;
+                double key = cls;
                 return MapLabelsCore(NumberType.R8, (in double val) => key == val, data);
             }
 

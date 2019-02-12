@@ -18,7 +18,6 @@ using Microsoft.ML.Internal.Calibration;
 using Microsoft.ML.Internal.CpuMath;
 using Microsoft.ML.Internal.Internallearn;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Learners;
 using Microsoft.ML.Numeric;
 using Microsoft.ML.Trainers;
 using Microsoft.ML.Training;
@@ -49,7 +48,7 @@ namespace Microsoft.ML.Trainers
 
     public abstract class LinearTrainerBase<TTransformer, TModel> : TrainerEstimatorBase<TTransformer, TModel>
         where TTransformer : ISingleFeaturePredictionTransformer<TModel>
-        where TModel : IPredictor
+        where TModel : class
     {
         private const string RegisterName = nameof(LinearTrainerBase<TTransformer, TModel>);
 
@@ -77,7 +76,7 @@ namespace Microsoft.ML.Trainers
             {
                 var preparedData = PrepareDataFromTrainingExamples(ch, context.TrainingSet, out int weightSetCount);
                 var initPred = context.InitialPredictor;
-                var linInitPred = (initPred as CalibratedPredictorBase)?.SubPredictor as LinearModelParameters;
+                var linInitPred = (initPred as IWeaklyTypedCalibratedModelParameters)?.WeeklyTypedSubModel as LinearModelParameters;
                 linInitPred = linInitPred ?? initPred as LinearModelParameters;
                 Host.CheckParam(context.InitialPredictor == null || linInitPred != null, nameof(context),
                     "Initial predictor was not a linear predictor.");
@@ -107,7 +106,7 @@ namespace Microsoft.ML.Trainers
                 idvToFeedTrain = idvToShuffle;
             else
             {
-                var shuffleArgs = new RowShufflingTransformer.Arguments
+                var shuffleArgs = new RowShufflingTransformer.Options
                 {
                     PoolOnly = false,
                     ForceShuffle = ShuffleData
@@ -153,7 +152,7 @@ namespace Microsoft.ML.Trainers
 
     public abstract class SdcaTrainerBase<TArgs, TTransformer, TModel> : StochasticTrainerBase<TTransformer, TModel>
         where TTransformer : ISingleFeaturePredictionTransformer<TModel>
-        where TModel : IPredictor
+        where TModel : class
         where TArgs : SdcaTrainerBase<TArgs, TTransformer, TModel>.ArgumentsBase, new()
     {
         // REVIEW: Making it even faster and more accurate:
@@ -1561,7 +1560,7 @@ namespace Microsoft.ML.Trainers
             var predictor = new LinearBinaryModelParameters(Host, in maybeSparseWeights, bias[0]);
             if (Info.NeedCalibration)
                 return predictor;
-            return new ParameterMixingCalibratedPredictor(Host, predictor, new PlattCalibrator(Host, -1, 0));
+            return new ParameterMixingCalibratedModelParameters<LinearBinaryModelParameters, PlattCalibrator>(Host, predictor, new PlattCalibrator(Host, -1, 0));
         }
 
         private protected override float GetInstanceWeight(FloatLabelCursor cursor)
@@ -1931,7 +1930,7 @@ namespace Microsoft.ML.Trainers
             var pred = new LinearBinaryModelParameters(Host, in maybeSparseWeights, bias);
             if (!(_loss is LogLoss))
                 return pred;
-            return new ParameterMixingCalibratedPredictor(Host, pred, new PlattCalibrator(Host, -1, 0));
+            return new ParameterMixingCalibratedModelParameters<LinearBinaryModelParameters, PlattCalibrator>(Host, pred, new PlattCalibrator(Host, -1, 0));
         }
 
         private protected override void CheckLabel(RoleMappedData examples, out int weightSetCount)

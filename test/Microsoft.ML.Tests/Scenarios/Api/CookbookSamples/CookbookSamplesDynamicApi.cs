@@ -11,9 +11,9 @@ using System.Linq;
 using Microsoft.Data.DataView;
 using Microsoft.ML.Core.Data;
 using Microsoft.ML.Data;
-using Microsoft.ML.Learners;
 using Microsoft.ML.RunTests;
 using Microsoft.ML.TestFramework;
+using Microsoft.ML.Trainers;
 using Microsoft.ML.Transforms.Categorical;
 using Microsoft.ML.Transforms.Normalizers;
 using Microsoft.ML.Transforms.Text;
@@ -316,7 +316,7 @@ namespace Microsoft.ML.Tests.Scenarios.Api.CookbookSamples
                 // NLP pipeline 4: word embeddings.
                 .Append(mlContext.Transforms.Text.TokenizeWords("TokenizedMessage", "NormalizedMessage"))
                 .Append(mlContext.Transforms.Text.ExtractWordEmbeddings("Embeddings", "TokenizedMessage",
-                            WordEmbeddingsExtractingTransformer.PretrainedModelKind.GloVeTwitter25D));
+                            WordEmbeddingsExtractingEstimator.PretrainedModelKind.GloVeTwitter25D));
 
             // Let's train our pipeline, and then apply it to the same data.
             // Note that even on a small dataset of 70KB the pipeline above can take up to a minute to completely train.

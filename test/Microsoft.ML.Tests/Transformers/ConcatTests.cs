@@ -6,6 +6,7 @@ using System.IO;
 using Microsoft.Data.DataView;
 using Microsoft.ML.Data;
 using Microsoft.ML.Data.IO;
+using Microsoft.ML.Internal.Utilities;
 using Microsoft.ML.RunTests;
 using Microsoft.ML.Transforms;
 using Xunit;
@@ -25,7 +26,7 @@ namespace Microsoft.ML.Tests.Transformers
             string dataPath = GetDataPath("adult.tiny.with-schema.txt");
 
             var source = new MultiFileSource(dataPath);
-            var loader = new TextLoader(Env, new TextLoader.Arguments
+            var loader = new TextLoader(ML, new TextLoader.Arguments
             {
                 Columns = new[]{
                     new TextLoader.Column("float1", DataKind.R4, 9),
@@ -43,12 +44,13 @@ namespace Microsoft.ML.Tests.Transformers
                 Assert.True(schema.TryGetColumnIndex(name, out int cIdx), $"Could not find '{name}'");
                 return schema[cIdx].Type;
             }
-            var pipe = new ColumnConcatenatingEstimator(Env, "f1", "float1")
-                .Append(new ColumnConcatenatingEstimator(Env, "f2", "float1", "float1"))
-                .Append(new ColumnConcatenatingEstimator(Env, "f3", "float4", "float1"))
-                .Append(new ColumnConcatenatingEstimator(Env, "f4", "float6", "vfloat", "float1"));
 
-            data = TakeFilter.Create(Env, data, 10);
+            var pipe = ML.Transforms.Concatenate("f1", "float1")
+                .Append(ML.Transforms.Concatenate("f2", "float1", "float1"))
+                .Append(ML.Transforms.Concatenate("f3", "float4", "float1"))
+                .Append(ML.Transforms.Concatenate("f4", "float6", "vfloat", "float1"));
+
+            data = ML.Data.TakeRows(data, 10);
             data = pipe.Fit(data).Transform(data);
 
             ColumnType t;
@@ -61,13 +63,13 @@ namespace Microsoft.ML.Tests.Transformers
             t = GetType(data.Schema, "f4");
             Assert.True(t is VectorType vt4 && vt4.ItemType == NumberType.R4 && vt4.Size == 0);
 
-            data = ColumnSelectingTransformer.CreateKeep(Env, data, new[] { "f1", "f2", "f3", "f4" });
+            data = ML.Transforms.SelectColumns("f1", "f2", "f3", "f4").Fit(data).Transform(data);
 
             var subdir = Path.Combine("Transform", "Concat");
             var outputPath = GetOutputPath(subdir, "Concat1.tsv");
             using (var ch = Env.Start("save"))
             {
-                var saver = new TextSaver(Env, new TextSaver.Arguments { Silent = true, Dense = true });
+                var saver = new TextSaver(ML, new TextSaver.Arguments { Silent = true, Dense = true });
                 using (var fs = File.Create(outputPath))
                     DataSaverUtils.SaveDataView(ch, saver, data, fs, keepHidden: false);
             }
@@ -82,7 +84,7 @@ namespace Microsoft.ML.Tests.Transformers
             string dataPath = GetDataPath("adult.tiny.with-schema.txt");
 
             var source = new MultiFileSource(dataPath);
-            var loader = new TextLoader(Env, new TextLoader.Arguments
+            var loader = new TextLoader(ML, new TextLoader.Arguments
             {
                 Columns = new[]{
                     new TextLoader.Column("float1", DataKind.R4, 9),
@@ -100,12 +102,24 @@ namespace Microsoft.ML.Tests.Transformers
                 return schema[cIdx].Type;
             }
 
-            data = TakeFilter.Create(Env, data, 10);
+            data = ML.Data.TakeRows(data, 10);
 
-            var concater = new ColumnConcatenatingTransformer(Env,
+            var concater = new ColumnConcatenatingTransformer(ML,
                 new ColumnConcatenatingTransformer.ColumnInfo("f2", new[] { ("float1", "FLOAT1"), ("float1", "FLOAT2") }),
                 new ColumnConcatenatingTransformer.ColumnInfo("f3", new[] { ("float4", "FLOAT4"), ("float1", "FLOAT1") }));
             data = concater.Transform(data);
+
+            // Test Columns property.
+            var columns = concater.Columns;
+            var colEnumerator = columns.GetEnumerator();
+            colEnumerator.MoveNext();
+            Assert.True(colEnumerator.Current.outputColumnName == "f2" && 
+                colEnumerator.Current.inputColumnNames[0] == "float1" && 
+                colEnumerator.Current.inputColumnNames[1] == "float1");
+            colEnumerator.MoveNext();
+            Assert.True(colEnumerator.Current.outputColumnName == "f3" &&
+                colEnumerator.Current.inputColumnNames[0] == "float4" &&
+                colEnumerator.Current.inputColumnNames[1] == "float1");
 
             ColumnType t;
             t = GetType(data.Schema, "f2");
@@ -113,13 +127,13 @@ namespace Microsoft.ML.Tests.Transformers
             t = GetType(data.Schema, "f3");
             Assert.True(t is VectorType vt3 && vt3.ItemType == NumberType.R4 && vt3.Size == 5);
 
-            data = ColumnSelectingTransformer.CreateKeep(Env, data, new[] { "f2", "f3" });
+            data = ML.Transforms.SelectColumns("f2", "f3" ).Fit(data).Transform(data);
 
             var subdir = Path.Combine("Transform", "Concat");
             var outputPath = GetOutputPath(subdir, "Concat2.tsv");
             using (var ch = Env.Start("save"))
             {
-                var saver = new TextSaver(Env, new TextSaver.Arguments { Silent = true, Dense = true });
+                var saver = new TextSaver(ML, new TextSaver.Arguments { Silent = true, Dense = true });
                 using (var fs = File.Create(outputPath))
                     DataSaverUtils.SaveDataView(ch, saver, data, fs, keepHidden: false);
             }

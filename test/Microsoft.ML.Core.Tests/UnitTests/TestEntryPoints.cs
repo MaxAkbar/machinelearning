@@ -12,7 +12,7 @@ using Microsoft.ML.Core.Data;
 using Microsoft.ML.Core.Tests.UnitTests;
 using Microsoft.ML.Data;
 using Microsoft.ML.Data.IO;
-using Microsoft.ML.Ensemble.EntryPoints;
+using Microsoft.ML.Ensemble;
 using Microsoft.ML.Ensemble.OutputCombiners;
 using Microsoft.ML.EntryPoints;
 using Microsoft.ML.EntryPoints.JsonUtils;
@@ -20,14 +20,14 @@ using Microsoft.ML.ImageAnalytics;
 using Microsoft.ML.Internal.Calibration;
 using Microsoft.ML.Internal.Internallearn;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Learners;
 using Microsoft.ML.LightGBM;
 using Microsoft.ML.Model.Onnx;
+using Microsoft.ML.TestFramework.Attributes;
 using Microsoft.ML.TimeSeriesProcessing;
 using Microsoft.ML.Trainers;
 using Microsoft.ML.Trainers.FastTree;
+using Microsoft.ML.Trainers.HalLearners;
 using Microsoft.ML.Trainers.PCA;
-using Microsoft.ML.Trainers.SymSgd;
 using Microsoft.ML.Transforms;
 using Microsoft.ML.Transforms.Categorical;
 using Microsoft.ML.Transforms.Conversions;
@@ -349,7 +349,7 @@ namespace Microsoft.ML.RunTests
         {
             Env.ComponentCatalog.RegisterAssembly(typeof(LightGbmBinaryModelParameters).Assembly);
             Env.ComponentCatalog.RegisterAssembly(typeof(TensorFlowTransformer).Assembly);
-            Env.ComponentCatalog.RegisterAssembly(typeof(ImageLoaderTransformer).Assembly);
+            Env.ComponentCatalog.RegisterAssembly(typeof(ImageLoadingTransformer).Assembly);
             Env.ComponentCatalog.RegisterAssembly(typeof(SymSgdClassificationTrainer).Assembly);
             Env.ComponentCatalog.RegisterAssembly(typeof(SaveOnnxCommand).Assembly);
             Env.ComponentCatalog.RegisterAssembly(typeof(TimeSeriesProcessingEntryPoints).Assembly);
@@ -733,7 +733,6 @@ namespace Microsoft.ML.RunTests
             var scoredFf = ScoreModel.Score(Env, new ScoreModel.Input() { Data = splitOutput.TestData[2], PredictorModel = twiceCalibratedFfModel }).ScoredData;
         }
 
-
         [Fact]
         public void EntryPointPipelineEnsemble()
         {
@@ -746,8 +745,8 @@ namespace Microsoft.ML.RunTests
             {
                 var data = splitOutput.TrainData[i];
                 data = new RandomFourierFeaturizingEstimator(Env, new[] {
-                    new RandomFourierFeaturizingTransformer.ColumnInfo("Features1", 10, false, "Features"),
-                    new RandomFourierFeaturizingTransformer.ColumnInfo("Features2", 10, false, "Features"),
+                    new RandomFourierFeaturizingEstimator.ColumnInfo("Features1", 10, false, "Features"),
+                    new RandomFourierFeaturizingEstimator.ColumnInfo("Features2", 10, false, "Features"),
                 }).Fit(data).Transform(data);
 
                 data = new ColumnConcatenatingTransformer(Env, "Features", new[] { "Features1", "Features2" }).Transform(data);
@@ -999,15 +998,15 @@ namespace Microsoft.ML.RunTests
                 var data = splitOutput.TrainData[i];
                 if (i % 2 == 0)
                 {
-                    data = new TextFeaturizingEstimator(Env, "Features", "Text", args =>
-                    {
-                        args.UseStopRemover = true;
-                    }).Fit(data).Transform(data);
+                    data = new TextFeaturizingEstimator(Env, "Features", new List<string> { "Text" }, 
+                        new TextFeaturizingEstimator.Options { 
+                            UseStopRemover = true,
+                        }).Fit(data).Transform(data);
                 }
                 else
                 {
                     data = WordHashBagProducingTransformer.Create(Env,
-                        new WordHashBagProducingTransformer.Arguments()
+                        new WordHashBagProducingTransformer.Options()
                         {
                             Columns =
                                 new[] { new WordHashBagProducingTransformer.Column() { Name = "Features", Source = new[] { "Text" } }, }
@@ -1198,8 +1197,8 @@ namespace Microsoft.ML.RunTests
             {
                 var data = splitOutput.TrainData[i];
                 data = new RandomFourierFeaturizingEstimator(Env, new[] {
-                    new RandomFourierFeaturizingTransformer.ColumnInfo("Features1", 10, false, "Features"),
-                    new RandomFourierFeaturizingTransformer.ColumnInfo("Features2", 10, false, "Features"),
+                    new RandomFourierFeaturizingEstimator.ColumnInfo("Features1", 10, false, "Features"),
+                    new RandomFourierFeaturizingEstimator.ColumnInfo("Features2", 10, false, "Features"),
                 }).Fit(data).Transform(data);
                 data = new ColumnConcatenatingTransformer(Env, "Features", new[] { "Features1", "Features2" }).Transform(data);
 
@@ -1314,7 +1313,7 @@ namespace Microsoft.ML.RunTests
             }
         }
 
-        [ConditionalFact(typeof(BaseTestBaseline), nameof(BaseTestBaseline.LessThanNetCore30OrNotNetCore))]
+        [LessThanNetCore30OrNotNetCoreFact("netcoreapp3.0 output differs from Baseline")]
         public void EntryPointPipelineEnsembleGetSummary()
         {
             var dataPath = GetDataPath("breast-cancer-withheader.txt");
@@ -1918,14 +1917,14 @@ namespace Microsoft.ML.RunTests
             }
         }
 
-        [ConditionalFact(typeof(Environment), nameof(Environment.Is64BitProcess))] // LightGBM is 64-bit only
+        [LightGBMFact]
         public void EntryPointLightGbmBinary()
         {
             Env.ComponentCatalog.RegisterAssembly(typeof(LightGbmBinaryModelParameters).Assembly);
             TestEntryPointRoutine("breast-cancer.txt", "Trainers.LightGbmBinaryClassifier");
         }
 
-        [ConditionalFact(typeof(Environment), nameof(Environment.Is64BitProcess))] // LightGBM is 64-bit only
+        [LightGBMFact]
         public void EntryPointLightGbmMultiClass()
         {
             Env.ComponentCatalog.RegisterAssembly(typeof(LightGbmBinaryModelParameters).Assembly);
@@ -2491,7 +2490,7 @@ namespace Microsoft.ML.RunTests
             Assert.True(success);
             var inputBuilder = new InputBuilder(Env, info.InputType, catalog);
 
-            var args = new SdcaBinaryTrainer.Options()
+            var options = new SdcaBinaryTrainer.Options()
             {
                 NormalizeFeatures = NormalizeOption.Yes,
                 CheckFrequency = 42
@@ -2504,7 +2503,7 @@ namespace Microsoft.ML.RunTests
             inputBindingMap.Add("TrainingData", new List<ParameterBinding>() { parameterBinding });
             inputMap.Add(parameterBinding, new SimpleVariableBinding("data"));
 
-            var result = inputBuilder.GetJsonObject(args, inputBindingMap, inputMap);
+            var result = inputBuilder.GetJsonObject(options, inputBindingMap, inputMap);
             var json = FixWhitespace(result.ToString(Formatting.Indented));
 
             var expected =
@@ -2516,8 +2515,8 @@ namespace Microsoft.ML.RunTests
             expected = FixWhitespace(expected);
             Assert.Equal(expected, json);
 
-            args.LossFunction = new HingeLoss.Arguments();
-            result = inputBuilder.GetJsonObject(args, inputBindingMap, inputMap);
+            options.LossFunction = new HingeLoss.Arguments();
+            result = inputBuilder.GetJsonObject(options, inputBindingMap, inputMap);
             json = FixWhitespace(result.ToString(Formatting.Indented));
 
             expected =
@@ -2532,8 +2531,8 @@ namespace Microsoft.ML.RunTests
             expected = FixWhitespace(expected);
             Assert.Equal(expected, json);
 
-            args.LossFunction = new HingeLoss.Arguments() { Margin = 2 };
-            result = inputBuilder.GetJsonObject(args, inputBindingMap, inputMap);
+            options.LossFunction = new HingeLoss.Arguments() { Margin = 2 };
+            result = inputBuilder.GetJsonObject(options, inputBindingMap, inputMap);
             json = FixWhitespace(result.ToString(Formatting.Indented));
 
             expected =
@@ -3546,7 +3545,7 @@ namespace Microsoft.ML.RunTests
                 Data = dataView,
                 Columns = new[] { new OneHotEncodingTransformer.Column { Name = "Categories", Source = "Categories" } }
             });
-            var concat = SchemaManipulation.ConcatColumns(Env, new ColumnConcatenatingTransformer.Arguments()
+            var concat = SchemaManipulation.ConcatColumns(Env, new ColumnConcatenatingTransformer.Options()
             {
                 Data = cat.OutputData,
                 Columns = new[] { new ColumnConcatenatingTransformer.Column { Name = "Features", Source = new[] { "Categories", "NumericFeatures" } } }
@@ -3629,11 +3628,11 @@ namespace Microsoft.ML.RunTests
                 },
                 InputFile = inputFile,
             }).Data;
-            var embedding = Transforms.Text.TextAnalytics.WordEmbeddings(Env, new WordEmbeddingsExtractingTransformer.Arguments()
+            var embedding = Transforms.Text.TextAnalytics.WordEmbeddings(Env, new WordEmbeddingsExtractingTransformer.Options()
             {
                 Data = dataView,
                 Columns = new[] { new WordEmbeddingsExtractingTransformer.Column { Name = "Features", Source = "Text" } },
-                ModelKind = WordEmbeddingsExtractingTransformer.PretrainedModelKind.Sswe
+                ModelKind = WordEmbeddingsExtractingEstimator.PretrainedModelKind.Sswe
             });
             var result = embedding.OutputData;
             using (var cursor = result.GetRowCursorForAllColumns())
@@ -3651,7 +3650,7 @@ namespace Microsoft.ML.RunTests
             }
         }
 
-        [ConditionalFact(typeof(Environment), nameof(Environment.Is64BitProcess))] // TensorFlow is 64-bit only
+        [TensorFlowFact]
         public void EntryPointTensorFlowTransform()
         {
             Env.ComponentCatalog.RegisterAssembly(typeof(TensorFlowTransformer).Assembly);
@@ -4071,7 +4070,7 @@ namespace Microsoft.ML.RunTests
             }
         }
 
-        [ConditionalFact(typeof(BaseTestBaseline), nameof(BaseTestBaseline.LessThanNetCore30OrNotNetCore))] // netcore3.0 output differs from Baseline
+        [LessThanNetCore30OrNotNetCoreFact("netcoreapp3.0 output differs from Baseline")]
         public void TestCrossValidationMacro()
         {
             var dataPath = GetDataPath(TestDatasets.generatedRegressionDatasetmacro.trainFilename);
@@ -5539,7 +5538,7 @@ namespace Microsoft.ML.RunTests
             }
         }
 
-        [ConditionalFact(typeof(Environment), nameof(Environment.Is64BitProcess))] // TensorFlow is 64-bit only
+        [TensorFlowFact]
         public void TestTensorFlowEntryPoint()
         {
             var dataPath = GetDataPath("Train-Tiny-28x28.txt");

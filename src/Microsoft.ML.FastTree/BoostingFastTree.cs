@@ -6,7 +6,6 @@ using System;
 using System.Linq;
 using Microsoft.ML.Core.Data;
 using Microsoft.ML.Internal.Internallearn;
-using Microsoft.ML.Trainers.FastTree.Internal;
 using Float = System.Single;
 
 namespace Microsoft.ML.Trainers.FastTree
@@ -14,7 +13,7 @@ namespace Microsoft.ML.Trainers.FastTree
     public abstract class BoostingFastTreeTrainerBase<TArgs, TTransformer, TModel> : FastTreeTrainerBase<TArgs, TTransformer, TModel>
         where TTransformer : ISingleFeaturePredictionTransformer<TModel>
         where TArgs : BoostedTreeArgs, new()
-        where TModel : IPredictorProducing<Float>
+        where TModel : class
     {
         protected BoostingFastTreeTrainerBase(IHostEnvironment env, TArgs args, SchemaShape.Column label) : base(env, args, label)
         {

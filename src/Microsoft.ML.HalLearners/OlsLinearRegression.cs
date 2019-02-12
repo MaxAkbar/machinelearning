@@ -15,7 +15,6 @@ using Microsoft.ML.Data;
 using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Internallearn;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Learners;
 using Microsoft.ML.Model;
 using Microsoft.ML.Trainers.HalLearners;
 using Microsoft.ML.Training;
@@ -35,7 +34,6 @@ using Microsoft.ML.Training;
 namespace Microsoft.ML.Trainers.HalLearners
 {
     /// <include file='doc.xml' path='doc/members/member[@name="OLS"]/*' />
-    [BestFriend]
     public sealed class OlsLinearRegressionTrainer : TrainerEstimatorBase<RegressionPredictionTransformer<OlsLinearRegressionModelParameters>, OlsLinearRegressionModelParameters>
     {
         public sealed class Options : LearnerInputBaseWithWeight

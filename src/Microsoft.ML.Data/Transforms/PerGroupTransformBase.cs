@@ -20,7 +20,7 @@ namespace Microsoft.ML.Data
     /// <typeparam name="TScore">The type of the values in the second input column</typeparam>
     /// <typeparam name="TState">Each class deriving from this transform should implement a state class that knows
     /// how to return the current group's output column values.</typeparam>
-    public abstract class PerGroupTransformBase<TLabel, TScore, TState> : IDataTransform
+    internal abstract class PerGroupTransformBase<TLabel, TScore, TState> : IDataTransform
         where TState : class
     {
         /// <summary>
@@ -133,7 +133,9 @@ namespace Microsoft.ML.Data
             GroupCol = ctx.LoadNonEmptyString();
         }
 
-        public virtual void Save(ModelSaveContext ctx)
+        void ICanSaveModel.Save(ModelSaveContext ctx) => SaveModel(ctx);
+
+        private protected virtual void SaveModel(ModelSaveContext ctx)
         {
             Host.AssertValue(ctx);
 

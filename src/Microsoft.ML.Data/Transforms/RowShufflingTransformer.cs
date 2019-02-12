@@ -15,7 +15,7 @@ using Microsoft.ML.Internal.Utilities;
 using Microsoft.ML.Model;
 using Microsoft.ML.Transforms;
 
-[assembly: LoadableClass(RowShufflingTransformer.Summary, typeof(RowShufflingTransformer), typeof(RowShufflingTransformer.Arguments), typeof(SignatureDataTransform),
+[assembly: LoadableClass(RowShufflingTransformer.Summary, typeof(RowShufflingTransformer), typeof(RowShufflingTransformer.Options), typeof(SignatureDataTransform),
     "Shuffle Transform", "ShuffleTransform", "Shuffle", "shuf")]
 
 [assembly: LoadableClass(RowShufflingTransformer.Summary, typeof(RowShufflingTransformer), null, typeof(SignatureLoadDataTransform),
@@ -30,16 +30,17 @@ namespace Microsoft.ML.Transforms
     /// rows in the input cursor, and then, successively, the output cursor will yield one
     /// of these rows and replace it with another row from the input.
     /// </summary>
-    public sealed class RowShufflingTransformer : RowToRowTransformBase
+    [BestFriend]
+    internal sealed class RowShufflingTransformer : RowToRowTransformBase
     {
-        private static class Defaults
+        public static class Defaults
         {
             public const int PoolRows = 1000;
             public const bool PoolOnly = false;
             public const bool ForceShuffle = false;
         }
 
-        public sealed class Arguments
+        public sealed class Options
         {
             // REVIEW: A more intelligent heuristic, based on the expected size of the inputs, perhaps?
             [Argument(ArgumentType.LastOccurenceWins, HelpText = "The pool will have this many rows", ShortName = "rows")]
@@ -99,14 +100,14 @@ namespace Microsoft.ML.Transforms
             int poolRows = Defaults.PoolRows,
             bool poolOnly = Defaults.PoolOnly,
             bool forceShuffle = Defaults.ForceShuffle)
-            : this(env, new Arguments() { PoolRows = poolRows, PoolOnly = poolOnly, ForceShuffle = forceShuffle }, input)
+            : this(env, new Options() { PoolRows = poolRows, PoolOnly = poolOnly, ForceShuffle = forceShuffle }, input)
         {
         }
 
         /// <summary>
-        /// Public constructor corresponding to SignatureDataTransform.
+        /// Constructor corresponding to SignatureDataTransform.
         /// </summary>
-        public RowShufflingTransformer(IHostEnvironment env, Arguments args, IDataView input)
+        public RowShufflingTransformer(IHostEnvironment env, Options args, IDataView input)
             : base(env, RegistrationName, input)
         {
             Host.CheckValue(args, nameof(args));
@@ -158,7 +159,7 @@ namespace Microsoft.ML.Transforms
             return h.Apply("Loading Model", ch => new RowShufflingTransformer(h, ctx, input));
         }
 
-        public override void Save(ModelSaveContext ctx)
+        private protected override void SaveModel(ModelSaveContext ctx)
         {
             Host.CheckValue(ctx, nameof(ctx));
             ctx.CheckAtModel();
@@ -198,7 +199,7 @@ namespace Microsoft.ML.Transforms
             if (Utils.Size(columnsToDrop) == 0)
                 return data;
 
-            var args = new ChooseColumnsByIndexTransform.Arguments();
+            var args = new ChooseColumnsByIndexTransform.Options();
             args.Drop = true;
             args.Indices = columnsToDrop.ToArray();
             return new ChooseColumnsByIndexTransform(env, args, data);

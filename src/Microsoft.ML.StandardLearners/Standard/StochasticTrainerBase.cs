@@ -10,11 +10,11 @@ using Microsoft.ML.Internal.Calibration;
 using Microsoft.ML.Training;
 using Microsoft.ML.Transforms;
 
-namespace Microsoft.ML.Learners
+namespace Microsoft.ML.Trainers
 {
     public abstract class StochasticTrainerBase<TTransformer, TModel> : TrainerEstimatorBase<TTransformer, TModel>
         where TTransformer : ISingleFeaturePredictionTransformer<TModel>
-        where TModel : IPredictor
+        where TModel : class
     {
         public StochasticTrainerBase(IHost host, SchemaShape.Column feature, SchemaShape.Column label, SchemaShape.Column weight = default)
             : base(host, feature, label, weight)
@@ -36,7 +36,9 @@ namespace Microsoft.ML.Learners
             {
                 var preparedData = PrepareDataFromTrainingExamples(ch, context.TrainingSet, out int weightSetCount);
                 var initPred = context.InitialPredictor;
-                var linInitPred = (initPred as CalibratedPredictorBase)?.SubPredictor as LinearModelParameters;
+                // Try extract linear model from calibrated predictor.
+                var linInitPred = (initPred as IWeaklyTypedCalibratedModelParameters)?.WeeklyTypedSubModel as LinearModelParameters;
+                // If the initial predictor is not calibrated, it should be a linear model.
                 linInitPred = linInitPred ?? initPred as LinearModelParameters;
                 Host.CheckParam(context.InitialPredictor == null || linInitPred != null, nameof(context),
                     "Initial predictor was not a linear predictor.");
@@ -73,7 +75,7 @@ namespace Microsoft.ML.Learners
                 idvToFeedTrain = idvToShuffle;
             else
             {
-                var shuffleArgs = new RowShufflingTransformer.Arguments
+                var shuffleArgs = new RowShufflingTransformer.Options
                 {
                     PoolOnly = false,
                     ForceShuffle = ShuffleData

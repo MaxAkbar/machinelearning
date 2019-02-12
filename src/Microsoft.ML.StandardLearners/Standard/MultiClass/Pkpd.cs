@@ -11,7 +11,6 @@ using Microsoft.ML.Data;
 using Microsoft.ML.Internal.Calibration;
 using Microsoft.ML.Internal.Internallearn;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Learners;
 using Microsoft.ML.Model;
 using Microsoft.ML.Trainers;
 using Microsoft.ML.Training;
@@ -88,7 +87,7 @@ namespace Microsoft.ML.Trainers
         /// <param name="labelColumn">The name of the label colum.</param>
         /// <param name="imputeMissingLabelsAsNegative">Whether to treat missing labels as having negative labels, instead of keeping them missing.</param>
         /// <param name="maxCalibrationExamples">Number of instances to train the calibrator.</param>
-        public Pkpd(IHostEnvironment env,
+        internal Pkpd(IHostEnvironment env,
             TScalarTrainer binaryEstimator,
             string labelColumn = DefaultColumnNames.Label,
             bool imputeMissingLabelsAsNegative = false,

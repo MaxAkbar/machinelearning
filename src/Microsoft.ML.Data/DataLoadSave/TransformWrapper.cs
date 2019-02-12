@@ -18,7 +18,7 @@ namespace Microsoft.ML.Data
 {
     // REVIEW: this class is public, as long as the Wrappers.cs in tests still rely on it.
     // It needs to become internal.
-    public sealed class TransformWrapper : ITransformer, ICanSaveModel
+    public sealed class TransformWrapper : ITransformer
     {
         public const string LoaderSignature = "TransformWrapper";
         private const string TransformDirTemplate = "Step_{0:000}";
@@ -46,7 +46,7 @@ namespace Microsoft.ML.Data
             return output.Schema;
         }
 
-        public void Save(ModelSaveContext ctx)
+        void ICanSaveModel.Save(ModelSaveContext ctx)
         {
             if (!_allowSave)
                 throw _host.Except("Saving is not permitted.");
@@ -180,6 +180,10 @@ namespace Microsoft.ML.Data
         {
         }
 
+        /// <summary>
+        /// Returns the <see cref="SchemaShape"/> of the schema which will be produced by the transformer.
+        /// Used for schema propagation and verification in a pipeline.
+        /// </summary>
         public override SchemaShape GetOutputSchema(SchemaShape inputSchema)
         {
             Host.CheckValue(inputSchema, nameof(inputSchema));
