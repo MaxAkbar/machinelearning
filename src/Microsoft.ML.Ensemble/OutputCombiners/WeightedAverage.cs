@@ -6,18 +6,18 @@ using System;
 using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
-using Microsoft.ML.Ensemble.OutputCombiners;
 using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Internallearn;
 using Microsoft.ML.Model;
+using Microsoft.ML.Trainers.Ensemble;
 
-[assembly: LoadableClass(typeof(WeightedAverage), typeof(WeightedAverage.Arguments), typeof(SignatureCombiner),
+[assembly: LoadableClass(typeof(WeightedAverage), typeof(WeightedAverage.Options), typeof(SignatureCombiner),
     WeightedAverage.UserName, WeightedAverage.LoadName)]
 
 [assembly: LoadableClass(typeof(WeightedAverage), null, typeof(SignatureLoadModel),
      WeightedAverage.UserName, WeightedAverage.LoaderSignature)]
 
-namespace Microsoft.ML.Ensemble.OutputCombiners
+namespace Microsoft.ML.Trainers.Ensemble
 {
     public sealed class WeightedAverage : BaseAverager, IWeightedAverager
     {
@@ -37,7 +37,7 @@ namespace Microsoft.ML.Ensemble.OutputCombiners
         }
 
         [TlcModule.Component(Name = LoadName, FriendlyName = UserName)]
-        public sealed class Arguments: ISupportBinaryOutputCombinerFactory
+        public sealed class Options: ISupportBinaryOutputCombinerFactory
         {
             [Argument(ArgumentType.AtMostOnce, HelpText = "The metric type to be used to find the weights for each model", ShortName = "wn", SortOrder = 50)]
             [TGUI(Label = "Weightage Name", Description = "The weights are calculated according to the selected metric")]
@@ -50,11 +50,11 @@ namespace Microsoft.ML.Ensemble.OutputCombiners
 
         public string WeightageMetricName { get { return _weightageKind.ToString(); } }
 
-        public WeightedAverage(IHostEnvironment env, Arguments args)
+        public WeightedAverage(IHostEnvironment env, Options options)
             : base(env, LoaderSignature)
         {
-            _weightageKind = args.WeightageName;
-            Host.CheckUserArg(Enum.IsDefined(typeof(WeightageKind), _weightageKind), nameof(args.WeightageName));
+            _weightageKind = options.WeightageName;
+            Host.CheckUserArg(Enum.IsDefined(typeof(WeightageKind), _weightageKind), nameof(options.WeightageName));
         }
 
         private WeightedAverage(IHostEnvironment env, ModelLoadContext ctx)

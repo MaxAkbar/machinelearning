@@ -8,11 +8,8 @@ using System.Linq;
 using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
-using Microsoft.ML.Ensemble;
-using Microsoft.ML.Ensemble.OutputCombiners;
-using Microsoft.ML.Ensemble.Selector;
 using Microsoft.ML.Internal.Internallearn;
-using Microsoft.ML.Trainers;
+using Microsoft.ML.Trainers.Ensemble;
 using Microsoft.ML.Training;
 
 [assembly: LoadableClass(MulticlassDataPartitionEnsembleTrainer.Summary, typeof(MulticlassDataPartitionEnsembleTrainer),
@@ -24,7 +21,7 @@ using Microsoft.ML.Training;
 [assembly: LoadableClass(typeof(MulticlassDataPartitionEnsembleTrainer), typeof(MulticlassDataPartitionEnsembleTrainer.Arguments),
     typeof(SignatureModelCombiner), "Multiclass Classification Ensemble Model Combiner", MulticlassDataPartitionEnsembleTrainer.LoadNameValue)]
 
-namespace Microsoft.ML.Ensemble
+namespace Microsoft.ML.Trainers.Ensemble
 {
     using TVectorPredictor = IPredictorProducing<VBuffer<Single>>;
     /// <summary>
@@ -47,7 +44,7 @@ namespace Microsoft.ML.Ensemble
 
             [Argument(ArgumentType.Multiple, HelpText = "Output combiner", ShortName = "oc", SortOrder = 5)]
             [TGUI(Label = "Output combiner", Description = "Output combiner type")]
-            public ISupportMulticlassOutputCombinerFactory OutputCombiner = new MultiMedian.Arguments();
+            public ISupportMulticlassOutputCombinerFactory OutputCombiner = new MultiMedian.Options();
 
             // REVIEW: If we make this public again it should be an *estimator* of this type of predictor, rather than the (deprecated) ITrainer.
             [Argument(ArgumentType.Multiple, HelpText = "Base predictor type", ShortName = "bp,basePredictorTypes", SortOrder = 1, Visibility = ArgumentAttribute.VisibilityType.CmdLineOnly, SignatureType = typeof(SignatureMultiClassClassifierTrainer))]

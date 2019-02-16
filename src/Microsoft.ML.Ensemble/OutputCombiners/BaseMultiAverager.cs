@@ -8,11 +8,11 @@ using Microsoft.ML.Internal.Utilities;
 using Microsoft.ML.Model;
 using Microsoft.ML.Numeric;
 
-namespace Microsoft.ML.Ensemble.OutputCombiners
+namespace Microsoft.ML.Trainers.Ensemble
 {
     public abstract class BaseMultiAverager : BaseMultiCombiner
     {
-        internal BaseMultiAverager(IHostEnvironment env, string name, ArgumentsBase args)
+        internal BaseMultiAverager(IHostEnvironment env, string name, OptionsBase args)
             : base(env, name, args)
         {
         }

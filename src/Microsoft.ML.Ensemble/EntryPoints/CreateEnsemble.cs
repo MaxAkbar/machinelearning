@@ -10,14 +10,13 @@ using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
-using Microsoft.ML.Ensemble;
-using Microsoft.ML.Ensemble.OutputCombiners;
 using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Trainers.Ensemble;
 
 [assembly: LoadableClass(typeof(void), typeof(EnsembleCreator), null, typeof(SignatureEntryPointModule), "CreateEnsemble")]
 
-namespace Microsoft.ML.Ensemble
+namespace Microsoft.ML.Trainers.Ensemble
 {
     /// <summary>
     /// A component to combine given models into an ensemble model.
@@ -94,7 +93,7 @@ namespace Microsoft.ML.Ensemble
             env.AssertValue(input);
             env.AssertNonEmpty(input.Models);
 
-            Schema inputSchema = null;
+            DataViewSchema inputSchema = null;
             startingData = null;
             transformedData = null;
             byte[][] transformedDataSerialized = null;
@@ -259,10 +258,10 @@ namespace Microsoft.ML.Ensemble
             switch (input.ModelCombiner)
             {
                 case ClassifierCombiner.Median:
-                    combiner = new MultiMedian(host, new MultiMedian.Arguments() { Normalize = true });
+                    combiner = new MultiMedian(host, new MultiMedian.Options() { Normalize = true });
                     break;
                 case ClassifierCombiner.Average:
-                    combiner = new MultiAverage(host, new MultiAverage.Arguments() { Normalize = true });
+                    combiner = new MultiAverage(host, new MultiAverage.Options() { Normalize = true });
                     break;
                 case ClassifierCombiner.Vote:
                     combiner = new MultiVoting(host);
