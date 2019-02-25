@@ -81,7 +81,7 @@ namespace Microsoft.ML.Trainers.PCA
         private readonly int _seed;
         private readonly string _featureColumn;
 
-        public override PredictionKind PredictionKind => PredictionKind.AnomalyDetection;
+        private protected override PredictionKind PredictionKind => PredictionKind.AnomalyDetection;
 
         // The training performs two passes, only. Probably not worth caching.
         private static readonly TrainerInfo _info = new TrainerInfo(caching: false);
@@ -328,7 +328,7 @@ namespace Microsoft.ML.Trainers.PCA
             }
         }
 
-        protected override SchemaShape.Column[] GetOutputColumnsCore(SchemaShape inputSchema)
+        private protected override SchemaShape.Column[] GetOutputColumnsCore(SchemaShape inputSchema)
         {
              return new[]
             {
@@ -346,7 +346,7 @@ namespace Microsoft.ML.Trainers.PCA
             };
         }
 
-        protected override AnomalyPredictionTransformer<PcaModelParameters> MakeTransformer(PcaModelParameters model, DataViewSchema trainSchema)
+        private protected override AnomalyPredictionTransformer<PcaModelParameters> MakeTransformer(PcaModelParameters model, DataViewSchema trainSchema)
             => new AnomalyPredictionTransformer<PcaModelParameters>(Host, model, trainSchema, _featureColumn);
 
         [TlcModule.EntryPoint(Name = "Trainers.PcaAnomalyDetector",
@@ -402,10 +402,7 @@ namespace Microsoft.ML.Trainers.PCA
 
         private readonly DataViewType _inputType;
 
-        public override PredictionKind PredictionKind
-        {
-            get { return PredictionKind.AnomalyDetection; }
-        }
+        private protected override PredictionKind PredictionKind => PredictionKind.AnomalyDetection;
 
         /// <summary>
         /// Instantiate new model parameters from trained model.
@@ -414,7 +411,7 @@ namespace Microsoft.ML.Trainers.PCA
         /// <param name="rank">The rank of the PCA approximation of the covariance matrix. This is the number of eigenvectors in the model.</param>
         /// <param name="eigenVectors">Array of eigenvectors.</param>
         /// <param name="mean">The mean vector of the training data.</param>
-        public PcaModelParameters(IHostEnvironment env, int rank, float[][] eigenVectors, in VBuffer<float> mean)
+        internal PcaModelParameters(IHostEnvironment env, int rank, float[][] eigenVectors, in VBuffer<float> mean)
             : base(env, RegistrationName)
         {
             _dimension = eigenVectors[0].Length;

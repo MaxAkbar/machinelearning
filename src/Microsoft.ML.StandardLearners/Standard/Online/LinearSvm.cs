@@ -69,7 +69,7 @@ namespace Microsoft.ML.Trainers.Online
             /// Column to use for example weight.
             /// </summary>
             [Argument(ArgumentType.AtMostOnce, HelpText = "Column to use for example weight", ShortName = "weight", SortOrder = 4, Visibility = ArgumentAttribute.VisibilityType.EntryPointsOnly)]
-            public Optional<string> WeightColumn = Optional<string>.Implicit(DefaultColumnNames.Weight);
+            public string WeightColumn = null;
         }
 
         private sealed class TrainState : TrainStateBase
@@ -258,9 +258,9 @@ namespace Microsoft.ML.Trainers.Online
             Opts = options;
         }
 
-        public override PredictionKind PredictionKind => PredictionKind.BinaryClassification;
+        private protected override PredictionKind PredictionKind => PredictionKind.BinaryClassification;
 
-        protected override SchemaShape.Column[] GetOutputColumnsCore(SchemaShape inputSchema)
+        private protected override SchemaShape.Column[] GetOutputColumnsCore(SchemaShape inputSchema)
         {
             return new[]
             {
@@ -292,7 +292,7 @@ namespace Microsoft.ML.Trainers.Online
                 calibrator: input.Calibrator, maxCalibrationExamples: input.MaxCalibrationExamples);
         }
 
-        protected override BinaryPredictionTransformer<LinearBinaryModelParameters> MakeTransformer(LinearBinaryModelParameters model, DataViewSchema trainSchema)
+        private protected override BinaryPredictionTransformer<LinearBinaryModelParameters> MakeTransformer(LinearBinaryModelParameters model, DataViewSchema trainSchema)
             => new BinaryPredictionTransformer<LinearBinaryModelParameters>(Host, model, trainSchema, FeatureColumn.Name);
     }
 }

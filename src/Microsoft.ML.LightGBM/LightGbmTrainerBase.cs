@@ -78,12 +78,8 @@ namespace Microsoft.ML.LightGBM
 
             LightGbmTrainerOptions.LabelColumn = label.Name;
             LightGbmTrainerOptions.FeatureColumn = featureColumn;
-
-            if (weightColumn != null)
-                LightGbmTrainerOptions.WeightColumn = Optional<string>.Explicit(weightColumn);
-
-            if (groupIdColumn != null)
-                LightGbmTrainerOptions.GroupIdColumn = Optional<string>.Explicit(groupIdColumn);
+            LightGbmTrainerOptions.WeightColumn = weightColumn;
+            LightGbmTrainerOptions.GroupIdColumn = groupIdColumn;
 
             InitParallelTraining();
         }
@@ -365,7 +361,7 @@ namespace Microsoft.ML.LightGBM
             Host.AssertValue(dtrain);
             Host.AssertValueOrNull(dvalid);
             // For multi class, the number of labels is required.
-            ch.Assert(PredictionKind != PredictionKind.MultiClassClassification || Options.ContainsKey("num_class"),
+            ch.Assert(((ITrainer)this).PredictionKind != PredictionKind.MultiClassClassification || Options.ContainsKey("num_class"),
                 "LightGBM requires the number of classes to be specified in the parameters.");
 
             // Only enable one trainer to run at one time.

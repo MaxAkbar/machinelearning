@@ -11,7 +11,7 @@ using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.Data;
 using Microsoft.ML.Model;
-using Microsoft.ML.Model.Onnx;
+using Microsoft.ML.Model.OnnxConverter;
 using Microsoft.ML.Model.Pfa;
 using Microsoft.ML.Transforms.Normalizers;
 using Newtonsoft.Json.Linq;
@@ -561,7 +561,7 @@ namespace Microsoft.ML.Transforms.Normalizers
             }
         }
 
-        protected override void CheckInputColumn(DataViewSchema inputSchema, int col, int srcCol)
+        private protected override void CheckInputColumn(DataViewSchema inputSchema, int col, int srcCol)
         {
             const string expectedType = "scalar or known-size vector of R4";
 
@@ -604,11 +604,11 @@ namespace Microsoft.ML.Transforms.Normalizers
             private DataViewSchema.Metadata MakeMetadata(int iinfo)
             {
                 var colInfo = _parent.Columns[iinfo];
-                var builder = new MetadataBuilder();
+                var builder = new DataViewSchema.Metadata.Builder();
 
                 builder.Add(MetadataUtils.Kinds.IsNormalized, BooleanDataViewType.Instance, (ValueGetter<bool>)IsNormalizedGetter);
                 builder.Add(InputSchema[ColMapNewToOld[iinfo]].Metadata, name => name == MetadataUtils.Kinds.SlotNames);
-                return builder.GetMetadata();
+                return builder.ToMetadata();
             }
 
             private void IsNormalizedGetter(ref bool dst)

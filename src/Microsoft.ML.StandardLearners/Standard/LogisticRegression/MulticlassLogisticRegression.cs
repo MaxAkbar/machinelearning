@@ -14,7 +14,7 @@ using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Internallearn;
 using Microsoft.ML.Internal.Utilities;
 using Microsoft.ML.Model;
-using Microsoft.ML.Model.Onnx;
+using Microsoft.ML.Model.OnnxConverter;
 using Microsoft.ML.Model.Pfa;
 using Microsoft.ML.Numeric;
 using Microsoft.ML.Trainers;
@@ -95,7 +95,7 @@ namespace Microsoft.ML.Trainers
             Host.CheckNonEmpty(featureColumn, nameof(featureColumn));
             Host.CheckNonEmpty(labelColumn, nameof(labelColumn));
 
-            ShowTrainingStats = Args.ShowTrainingStats;
+            ShowTrainingStats = LbfgsTrainerOptions.ShowTrainingStats;
         }
 
         /// <summary>
@@ -104,10 +104,10 @@ namespace Microsoft.ML.Trainers
         internal MulticlassLogisticRegression(IHostEnvironment env, Options options)
             : base(env, options, TrainerUtils.MakeU4ScalarColumn(options.LabelColumn))
         {
-            ShowTrainingStats = Args.ShowTrainingStats;
+            ShowTrainingStats = LbfgsTrainerOptions.ShowTrainingStats;
         }
 
-        public override PredictionKind PredictionKind => PredictionKind.MultiClassClassification;
+        private protected override PredictionKind PredictionKind => PredictionKind.MultiClassClassification;
 
         private protected override void CheckLabel(RoleMappedData data)
         {
@@ -220,16 +220,17 @@ namespace Microsoft.ML.Trainers
             return weight * datumLoss;
         }
 
-        private protected override VBuffer<float> InitializeWeightsFromPredictor(MulticlassLogisticRegressionModelParameters srcPredictor)
+        private protected override VBuffer<float> InitializeWeightsFromPredictor(IPredictor srcPredictor)
         {
-            Contracts.AssertValue(srcPredictor);
-            Contracts.Assert(srcPredictor.InputType.GetVectorSize() > 0);
+            var pred = srcPredictor as MulticlassLogisticRegressionModelParameters;
+            Contracts.AssertValue(pred);
+            Contracts.Assert(pred.InputType.GetVectorSize() > 0);
 
             // REVIEW: Support initializing the weights of a superset of features.
-            if (srcPredictor.InputType.GetVectorSize() != NumFeatures)
+            if (pred.InputType.GetVectorSize() != NumFeatures)
                 throw Contracts.Except("The input training data must have the same features used to train the input predictor.");
 
-            return InitializeWeights(srcPredictor.DenseWeightsEnumerable(), srcPredictor.GetBiases());
+            return InitializeWeights(pred.DenseWeightsEnumerable(), pred.GetBiases());
         }
 
         private protected override MulticlassLogisticRegressionModelParameters CreatePredictor()
@@ -308,7 +309,7 @@ namespace Microsoft.ML.Trainers
             _prior[iLabel] += weight;
         }
 
-        protected override SchemaShape.Column[] GetOutputColumnsCore(SchemaShape inputSchema)
+        private protected override SchemaShape.Column[] GetOutputColumnsCore(SchemaShape inputSchema)
         {
             bool success = inputSchema.TryFindColumn(LabelColumn.Name, out var labelCol);
             Contracts.Assert(success);
@@ -322,15 +323,15 @@ namespace Microsoft.ML.Trainers
             };
         }
 
-        protected override MulticlassPredictionTransformer<MulticlassLogisticRegressionModelParameters> MakeTransformer(MulticlassLogisticRegressionModelParameters model, DataViewSchema trainSchema)
+        private protected override MulticlassPredictionTransformer<MulticlassLogisticRegressionModelParameters> MakeTransformer(MulticlassLogisticRegressionModelParameters model, DataViewSchema trainSchema)
             => new MulticlassPredictionTransformer<MulticlassLogisticRegressionModelParameters>(Host, model, trainSchema, FeatureColumn.Name, LabelColumn.Name);
 
         /// <summary>
-        /// Continues the training of a <see cref="MulticlassLogisticRegression"/> using an initial predictor and returns
+        /// Continues the training of a <see cref="MulticlassLogisticRegression"/> using an already trained <paramref name="modelParameters"/> and returns
         /// a <see cref="MulticlassPredictionTransformer{MulticlassLogisticRegressionModelParameters}"/>.
         /// </summary>
-        public MulticlassPredictionTransformer<MulticlassLogisticRegressionModelParameters> Fit(IDataView trainData, IPredictor initialPredictor)
-            => TrainTransformer(trainData, initPredictor: initialPredictor);
+        public MulticlassPredictionTransformer<MulticlassLogisticRegressionModelParameters> Fit(IDataView trainData, MulticlassLogisticRegressionModelParameters modelParameters)
+            => TrainTransformer(trainData, initPredictor: modelParameters);
     }
 
     public sealed class MulticlassLogisticRegressionModelParameters :
@@ -381,7 +382,7 @@ namespace Microsoft.ML.Trainers
         // at which point it is initialized.
         private volatile VBuffer<float>[] _weightsDense;
 
-        public override PredictionKind PredictionKind => PredictionKind.MultiClassClassification;
+        private protected override PredictionKind PredictionKind => PredictionKind.MultiClassClassification;
         internal readonly DataViewType InputType;
         internal readonly DataViewType OutputType;
         DataViewType IValueMapper.InputType => InputType;
@@ -433,7 +434,7 @@ namespace Microsoft.ML.Trainers
         /// <param name="numFeatures">The length of the feature vector.</param>
         /// <param name="labelNames">The optional label names. If specified not null, it should have the same length as <paramref name="numClasses"/>.</param>
         /// <param name="stats">The model statistics.</param>
-        public MulticlassLogisticRegressionModelParameters(IHostEnvironment env, VBuffer<float>[] weights, float[] bias, int numClasses, int numFeatures, string[] labelNames, LinearModelStatistics stats = null)
+        internal MulticlassLogisticRegressionModelParameters(IHostEnvironment env, VBuffer<float>[] weights, float[] bias, int numClasses, int numFeatures, string[] labelNames, LinearModelStatistics stats = null)
             : base(env, RegistrationName)
         {
             Contracts.CheckValue(weights, nameof(weights));

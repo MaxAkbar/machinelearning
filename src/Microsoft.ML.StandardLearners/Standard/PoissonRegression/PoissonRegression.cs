@@ -75,7 +75,7 @@ namespace Microsoft.ML.Trainers
         {
         }
 
-        public override PredictionKind PredictionKind => PredictionKind.Regression;
+        private protected override PredictionKind PredictionKind => PredictionKind.Regression;
 
         private protected override void CheckLabel(RoleMappedData data)
         {
@@ -83,7 +83,7 @@ namespace Microsoft.ML.Trainers
             data.CheckRegressionLabel();
         }
 
-        protected override SchemaShape.Column[] GetOutputColumnsCore(SchemaShape inputSchema)
+        private protected override SchemaShape.Column[] GetOutputColumnsCore(SchemaShape inputSchema)
         {
             return new[]
             {
@@ -91,20 +91,20 @@ namespace Microsoft.ML.Trainers
             };
         }
 
-        protected override RegressionPredictionTransformer<PoissonRegressionModelParameters> MakeTransformer(PoissonRegressionModelParameters model, DataViewSchema trainSchema)
+        private protected override RegressionPredictionTransformer<PoissonRegressionModelParameters> MakeTransformer(PoissonRegressionModelParameters model, DataViewSchema trainSchema)
             => new RegressionPredictionTransformer<PoissonRegressionModelParameters>(Host, model, trainSchema, FeatureColumn.Name);
 
         /// <summary>
-        /// Continues the training of a <see cref="PoissonRegression"/> using an initial predictor and returns
+        /// Continues the training of a <see cref="PoissonRegression"/> using an already trained <paramref name="linearModel"/> and returns
         /// a <see cref="RegressionPredictionTransformer{PoissonRegressionModelParameters}"/>.
         /// </summary>
-        public RegressionPredictionTransformer<PoissonRegressionModelParameters> Fit(IDataView trainData, IPredictor initialPredictor)
-            => TrainTransformer(trainData, initPredictor: initialPredictor);
+        public RegressionPredictionTransformer<PoissonRegressionModelParameters> Fit(IDataView trainData, LinearModelParameters linearModel)
+            => TrainTransformer(trainData, initPredictor: linearModel);
 
-        private protected override VBuffer<float> InitializeWeightsFromPredictor(PoissonRegressionModelParameters srcPredictor)
+        private protected override VBuffer<float> InitializeWeightsFromPredictor(IPredictor srcPredictor)
         {
-            Contracts.AssertValue(srcPredictor);
-            return InitializeWeights(srcPredictor.Weights, new[] { srcPredictor.Bias });
+            var modelParameters = (LinearModelParameters)srcPredictor;
+            return InitializeWeights(modelParameters.Weights, new[] { modelParameters.Bias });
         }
 
         private protected override void PreTrainingProcessInstance(float label, in VBuffer<float> feat, float weight)

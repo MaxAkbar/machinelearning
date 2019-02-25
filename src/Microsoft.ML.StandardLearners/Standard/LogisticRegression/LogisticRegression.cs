@@ -92,7 +92,7 @@ namespace Microsoft.ML.Trainers
             Host.CheckNonEmpty(labelColumn, nameof(labelColumn));
 
             _posWeight = 0;
-            ShowTrainingStats = Args.ShowTrainingStats;
+            ShowTrainingStats = LbfgsTrainerOptions.ShowTrainingStats;
         }
 
         /// <summary>
@@ -102,10 +102,10 @@ namespace Microsoft.ML.Trainers
             : base(env, options, TrainerUtils.MakeBoolScalarLabel(options.LabelColumn))
         {
             _posWeight = 0;
-            ShowTrainingStats = Args.ShowTrainingStats;
+            ShowTrainingStats = LbfgsTrainerOptions.ShowTrainingStats;
         }
 
-        public override PredictionKind PredictionKind => PredictionKind.BinaryClassification;
+        private protected override PredictionKind PredictionKind => PredictionKind.BinaryClassification;
 
         private protected override void CheckLabel(RoleMappedData data)
         {
@@ -113,7 +113,7 @@ namespace Microsoft.ML.Trainers
             data.CheckBinaryLabel();
         }
 
-        protected override SchemaShape.Column[] GetOutputColumnsCore(SchemaShape inputSchema)
+        private protected override SchemaShape.Column[] GetOutputColumnsCore(SchemaShape inputSchema)
         {
             return new[]
             {
@@ -123,16 +123,16 @@ namespace Microsoft.ML.Trainers
             };
         }
 
-        protected override BinaryPredictionTransformer<CalibratedModelParametersBase<LinearBinaryModelParameters, PlattCalibrator>>
+        private protected override BinaryPredictionTransformer<CalibratedModelParametersBase<LinearBinaryModelParameters, PlattCalibrator>>
             MakeTransformer(CalibratedModelParametersBase<LinearBinaryModelParameters, PlattCalibrator> model, DataViewSchema trainSchema)
             => new BinaryPredictionTransformer<CalibratedModelParametersBase<LinearBinaryModelParameters, PlattCalibrator>>(Host, model, trainSchema, FeatureColumn.Name);
 
         /// <summary>
-        /// Continues the training of a <see cref="LogisticRegression"/> using an initial predictor and returns
+        /// Continues the training of a <see cref="LogisticRegression"/> using an already trained <paramref name="modelParameters"/> and returns
         /// a <see cref="BinaryPredictionTransformer{CalibratedModelParametersBase}"/>.
         /// </summary>
-        public BinaryPredictionTransformer<CalibratedModelParametersBase<LinearBinaryModelParameters, PlattCalibrator>> Fit(IDataView trainData, IPredictor initialPredictor)
-            => TrainTransformer(trainData, initPredictor: initialPredictor);
+        public BinaryPredictionTransformer<CalibratedModelParametersBase<LinearBinaryModelParameters, PlattCalibrator>> Fit(IDataView trainData, LinearModelParameters modelParameters)
+            => TrainTransformer(trainData, initPredictor: modelParameters);
 
         private protected override float AccumulateOneGradient(in VBuffer<float> feat, float label, float weight,
             in VBuffer<float> x, ref VBuffer<float> grad, ref float[] scratch)
@@ -355,11 +355,11 @@ namespace Microsoft.ML.Trainers
                 }
             }
 
-            if (Args.StdComputer == null)
+            if (LbfgsTrainerOptions.StdComputer == null)
                 _stats = new LinearModelStatistics(Host, NumGoodRows, numParams, deviance, nullDeviance);
             else
             {
-                var std = Args.StdComputer.ComputeStd(hessian, weightIndices, numParams, CurrentWeights.Length, ch, L2Weight);
+                var std = LbfgsTrainerOptions.StdComputer.ComputeStd(hessian, weightIndices, numParams, CurrentWeights.Length, ch, L2Weight);
                 _stats = new LinearModelStatistics(Host, NumGoodRows, numParams, deviance, nullDeviance, std);
             }
         }
@@ -384,11 +384,11 @@ namespace Microsoft.ML.Trainers
             return opt;
         }
 
-        private protected override VBuffer<float> InitializeWeightsFromPredictor(CalibratedModelParametersBase<LinearBinaryModelParameters, PlattCalibrator> srcPredictor)
+        private protected override VBuffer<float> InitializeWeightsFromPredictor(IPredictor srcPredictor)
         {
             Contracts.AssertValue(srcPredictor);
 
-            var pred = srcPredictor.SubModel as LinearBinaryModelParameters;
+            var pred = srcPredictor as LinearModelParameters;
             Contracts.AssertValue(pred);
             return InitializeWeights(pred.Weights, new[] { pred.Bias });
         }

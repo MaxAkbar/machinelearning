@@ -13,7 +13,7 @@ using Microsoft.ML.Data;
 using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Utilities;
 using Microsoft.ML.Model;
-using Microsoft.ML.Model.Onnx;
+using Microsoft.ML.Model.OnnxConverter;
 using Microsoft.ML.Transforms.Conversions;
 
 [assembly: LoadableClass(TypeConvertingTransformer.Summary, typeof(IDataTransform), typeof(TypeConvertingTransformer), typeof(TypeConvertingTransformer.Options), typeof(SignatureDataTransform),
@@ -437,7 +437,7 @@ namespace Microsoft.ML.Transforms.Conversions
                 var result = new DataViewSchema.DetachedColumn[_parent._columns.Length];
                 for (int i = 0; i < _parent._columns.Length; i++)
                 {
-                    var builder = new MetadataBuilder();
+                    var builder = new DataViewSchema.Metadata.Builder();
                     var srcType = InputSchema[_srcCols[i]].Type;
                     if (_types[i].IsKnownSizeVector())
                         builder.Add(InputSchema[ColMapNewToOld[i]].Metadata, name => name == MetadataUtils.Kinds.SlotNames);
@@ -460,7 +460,7 @@ namespace Microsoft.ML.Transforms.Conversions
                         ValueGetter<bool> getter = (ref bool dst) => dst = true;
                         builder.Add(MetadataUtils.Kinds.IsNormalized, BooleanDataViewType.Instance, getter);
                     }
-                    result[i] = new DataViewSchema.DetachedColumn(_parent._columns[i].Name, _types[i], builder.GetMetadata());
+                    result[i] = new DataViewSchema.DetachedColumn(_parent._columns[i].Name, _types[i], builder.ToMetadata());
                 }
                 return result;
             }

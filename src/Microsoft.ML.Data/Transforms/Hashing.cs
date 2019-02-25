@@ -136,7 +136,7 @@ namespace Microsoft.ML.Transforms.Conversions
         private readonly VBuffer<ReadOnlyMemory<char>>[] _keyValues;
         private readonly VectorType[] _kvTypes;
 
-        protected override void CheckInputColumn(DataViewSchema inputSchema, int col, int srcCol)
+        private protected override void CheckInputColumn(DataViewSchema inputSchema, int col, int srcCol)
         {
             var type = inputSchema[srcCol].Type;
             if (!HashingEstimator.IsColumnTypeValid(type))
@@ -817,17 +817,17 @@ namespace Microsoft.ML.Transforms.Conversions
                 for (int i = 0; i < _parent.ColumnPairs.Length; i++)
                 {
                     InputSchema.TryGetColumnIndex(_parent.ColumnPairs[i].inputColumnName, out int colIndex);
-                    var meta = new MetadataBuilder();
+                    var meta = new DataViewSchema.Metadata.Builder();
 
                     meta.Add(InputSchema[colIndex].Metadata, name => name == MetadataUtils.Kinds.SlotNames);
 
                     if (_parent._kvTypes != null && _parent._kvTypes[i] != null)
                         AddMetaKeyValues(i, meta);
-                    result[i] = new DataViewSchema.DetachedColumn(_parent.ColumnPairs[i].outputColumnName, _types[i], meta.GetMetadata());
+                    result[i] = new DataViewSchema.DetachedColumn(_parent.ColumnPairs[i].outputColumnName, _types[i], meta.ToMetadata());
                 }
                 return result;
             }
-            private void AddMetaKeyValues(int i, MetadataBuilder builder)
+            private void AddMetaKeyValues(int i, DataViewSchema.Metadata.Builder builder)
             {
                 ValueGetter<VBuffer<ReadOnlyMemory<char>>> getter = (ref VBuffer<ReadOnlyMemory<char>> dst) =>
                 {
