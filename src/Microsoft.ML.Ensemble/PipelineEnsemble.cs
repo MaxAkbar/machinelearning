@@ -7,14 +7,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
+using Microsoft.ML.Calibrators;
 using Microsoft.ML.Data;
 using Microsoft.ML.EntryPoints;
-using Microsoft.ML.Internal.Calibration;
-using Microsoft.ML.Internal.Internallearn;
 using Microsoft.ML.Internal.Utilities;
 using Microsoft.ML.Model;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Trainers.Ensemble;
 
 [assembly: LoadableClass(typeof(SchemaBindablePipelineEnsembleBase), null, typeof(SignatureLoadModel),
@@ -75,7 +74,7 @@ namespace Microsoft.ML.Trainers.Ensemble
                         throw Parent.Host.Except("Predictor {0} is not a row to row mapper", i);
 
                     // Make sure there is a score column, and remember its index.
-                    var scoreCol = Mappers[i].OutputSchema.GetColumnOrNull(MetadataUtils.Const.ScoreValueKind.Score);
+                    var scoreCol = Mappers[i].OutputSchema.GetColumnOrNull(AnnotationUtils.Const.ScoreValueKind.Score);
                     if (!scoreCol.HasValue)
                         throw Parent.Host.Except("Predictor {0} does not contain a score column", i);
                     ScoreCols[i] = scoreCol.Value.Index;
@@ -90,14 +89,15 @@ namespace Microsoft.ML.Trainers.Ensemble
                 }
             }
 
-            public Func<int, bool> GetDependencies(Func<int, bool> predicate)
+            /// <summary>
+            /// Given a set of columns, return the input columns that are needed to generate those output columns.
+            /// </summary>
+            IEnumerable<DataViewSchema.Column> ISchemaBoundRowMapper.GetDependenciesForNewColumns(IEnumerable<DataViewSchema.Column> dependingColumns)
             {
-                for (int i = 0; i < OutputSchema.Count; i++)
-                {
-                    if (predicate(i))
-                        return col => _inputColIndices.Contains(col);
-                }
-                return col => false;
+                if (dependingColumns.Count() == 0)
+                    return Enumerable.Empty<DataViewSchema.Column>();
+
+                return InputSchema.Where(col => _inputColIndices.Contains(col.Index));
             }
 
             public IEnumerable<KeyValuePair<RoleMappedSchema.ColumnRole, string>> GetInputColumnRoles()
@@ -105,13 +105,13 @@ namespace Microsoft.ML.Trainers.Ensemble
                 yield break;
             }
 
-            public DataViewRow GetRow(DataViewRow input, Func<int, bool> predicate)
+            DataViewRow ISchemaBoundRowMapper.GetRow(DataViewRow input, IEnumerable<DataViewSchema.Column> activeColumns)
             {
-                var scoreGetter = CreateScoreGetter(input, predicate, out Action disposer);
+                var scoreGetter = CreateScoreGetter(input, out Action disposer);
                 return new SimpleRow(OutputSchema, input, new[] { scoreGetter }, disposer);
             }
 
-            internal abstract Delegate CreateScoreGetter(DataViewRow input, Func<int, bool> mapperPredicate, out Action disposer);
+            internal abstract Delegate CreateScoreGetter(DataViewRow input, out Action disposer);
         }
 
         // A generic base class for pipeline ensembles. This class contains the combiner.
@@ -127,24 +127,23 @@ namespace Microsoft.ML.Trainers.Ensemble
                     _combiner = parent.Combiner;
                 }
 
-                internal override Delegate CreateScoreGetter(DataViewRow input, Func<int, bool> mapperPredicate, out Action disposer)
+                internal override Delegate CreateScoreGetter(DataViewRow input, out Action disposer)
                 {
                     disposer = null;
-
-                    if (!mapperPredicate(0))
-                        return null;
 
                     var getters = new ValueGetter<T>[Mappers.Length];
                     for (int i = 0; i < Mappers.Length; i++)
                     {
                         // First get the output row from the pipelines. The input predicate of the predictor
                         // is the output predicate of the pipeline.
-                        var inputPredicate = Mappers[i].GetDependencies(mapperPredicate);
-                        var pipelineRow = BoundPipelines[i].GetRow(input, inputPredicate);
+                        var mapperColumns = Mappers[i].OutputSchema.Where(col => col.Name == DefaultColumnNames.Score);
+                        var inputColumns = Mappers[i].GetDependenciesForNewColumns(mapperColumns);
+
+                        var pipelineRow = BoundPipelines[i].GetRow(input, inputColumns);
 
                         // Next we get the output row from the predictors. We activate the score column as output predicate.
-                        var predictorRow = Mappers[i].GetRow(pipelineRow, col => col == ScoreCols[i]);
-                        getters[i] = predictorRow.GetGetter<T>(ScoreCols[i]);
+                        var predictorRow = Mappers[i].GetRow(pipelineRow, Enumerable.Repeat(Mappers[i].InputSchema[ScoreCols[i]], 1));
+                        getters[i] = predictorRow.GetGetter<T>(predictorRow.Schema[ScoreCols[i]]);
                         disposer += predictorRow.Dispose;
                     }
 
@@ -167,7 +166,7 @@ namespace Microsoft.ML.Trainers.Ensemble
                     var labelCol = Mappers[i].InputRoleMappedSchema.Label.Value;
 
                     // The label should be in the output row of the i'th pipeline
-                    var pipelineRow = BoundPipelines[i].GetRow(input, col => col == labelCol.Index);
+                    var pipelineRow = BoundPipelines[i].GetRow(input, labelCol);
                     disposer = pipelineRow.Dispose;
                     return RowCursorUtils.GetLabelGetter(pipelineRow, labelCol.Index);
                 }
@@ -184,10 +183,11 @@ namespace Microsoft.ML.Trainers.Ensemble
                     }
                     var weightCol = Mappers[i].InputRoleMappedSchema.Weight.Value;
                     // The weight should be in the output row of the i'th pipeline if it exists.
-                    var inputPredicate = Mappers[i].GetDependencies(col => col == weightCol.Index);
-                    var pipelineRow = BoundPipelines[i].GetRow(input, inputPredicate);
+                    var inputColumns = Mappers[i].GetDependenciesForNewColumns(Enumerable.Repeat(weightCol, 1));
+
+                    var pipelineRow = BoundPipelines[i].GetRow(input, inputColumns);
                     disposer = pipelineRow.Dispose;
-                    return pipelineRow.GetGetter<float>(weightCol.Index);
+                    return pipelineRow.GetGetter<float>(weightCol);
 
                 }
             }
@@ -237,9 +237,9 @@ namespace Microsoft.ML.Trainers.Ensemble
             {
                 get
                 {
-                    if (_scoreColumnKind == MetadataUtils.Const.ScoreColumnKind.Regression)
+                    if (_scoreColumnKind == AnnotationUtils.Const.ScoreColumnKind.Regression)
                         return PredictionKind.Regression;
-                    if (_scoreColumnKind == MetadataUtils.Const.ScoreColumnKind.AnomalyDetection)
+                    if (_scoreColumnKind == AnnotationUtils.Const.ScoreColumnKind.AnomalyDetection)
                         return PredictionKind.AnomalyDetection;
                     throw Host.Except("Unknown prediction kind");
                 }
@@ -265,26 +265,26 @@ namespace Microsoft.ML.Trainers.Ensemble
             {
                 get
                 {
-                    if (_scoreColumnKind == MetadataUtils.Const.ScoreColumnKind.MultiClassClassification)
-                        return PredictionKind.MultiClassClassification;
+                    if (_scoreColumnKind == AnnotationUtils.Const.ScoreColumnKind.MulticlassClassification)
+                        return PredictionKind.MulticlassClassification;
                     throw Host.Except("Unknown prediction kind");
                 }
             }
 
-            private readonly VectorType _scoreType;
+            private readonly VectorDataViewType _scoreType;
 
-            public ImplVec(IHostEnvironment env, PredictorModel[] predictors, IMultiClassOutputCombiner combiner)
-                : base(env, predictors, combiner, LoaderSignature, MetadataUtils.Const.ScoreColumnKind.MultiClassClassification)
+            public ImplVec(IHostEnvironment env, PredictorModel[] predictors, IMulticlassOutputCombiner combiner)
+                : base(env, predictors, combiner, LoaderSignature, AnnotationUtils.Const.ScoreColumnKind.MulticlassClassification)
             {
                 int classCount = CheckLabelColumn(Host, predictors, false);
-                _scoreType = new VectorType(NumberDataViewType.Single, classCount);
+                _scoreType = new VectorDataViewType(NumberDataViewType.Single, classCount);
             }
 
             public ImplVec(IHostEnvironment env, ModelLoadContext ctx, string scoreColumnKind)
                 : base(env, ctx, scoreColumnKind)
             {
                 int classCount = CheckLabelColumn(Host, PredictorModels, false);
-                _scoreType = new VectorType(NumberDataViewType.Single, classCount);
+                _scoreType = new VectorDataViewType(NumberDataViewType.Single, classCount);
             }
         }
 
@@ -296,16 +296,16 @@ namespace Microsoft.ML.Trainers.Ensemble
             public override PredictionKind PredictionKind { get { return PredictionKind.BinaryClassification; } }
 
             public ImplOneWithCalibrator(IHostEnvironment env, PredictorModel[] predictors, IBinaryOutputCombiner combiner)
-                : base(env, predictors, combiner, LoaderSignature, MetadataUtils.Const.ScoreColumnKind.BinaryClassification)
+                : base(env, predictors, combiner, LoaderSignature, AnnotationUtils.Const.ScoreColumnKind.BinaryClassification)
             {
-                Host.Assert(_scoreColumnKind == MetadataUtils.Const.ScoreColumnKind.BinaryClassification);
+                Host.Assert(_scoreColumnKind == AnnotationUtils.Const.ScoreColumnKind.BinaryClassification);
                 CheckBinaryLabel(true, Host, PredictorModels);
             }
 
             public ImplOneWithCalibrator(IHostEnvironment env, ModelLoadContext ctx, string scoreColumnKind)
                 : base(env, ctx, scoreColumnKind)
             {
-                Host.Assert(_scoreColumnKind == MetadataUtils.Const.ScoreColumnKind.BinaryClassification);
+                Host.Assert(_scoreColumnKind == AnnotationUtils.Const.ScoreColumnKind.BinaryClassification);
                 CheckBinaryLabel(false, Host, PredictorModels);
             }
 
@@ -330,7 +330,7 @@ namespace Microsoft.ML.Trainers.Ensemble
                     var bound = new Bound(this, new RoleMappedSchema(data.Schema));
                     using (var curs = data.GetRowCursorForAllColumns())
                     {
-                        var scoreGetter = (ValueGetter<Single>)bound.CreateScoreGetter(curs, col => true, out Action disposer);
+                        var scoreGetter = (ValueGetter<Single>)bound.CreateScoreGetter(curs, out Action disposer);
 
                         // We assume that we can use the label column of the first predictor, since if the labels are not identical
                         // then the whole model is garbage anyway.
@@ -520,19 +520,19 @@ namespace Microsoft.ML.Trainers.Ensemble
         {
             switch (scoreColumnKind)
             {
-                case MetadataUtils.Const.ScoreColumnKind.BinaryClassification:
+                case AnnotationUtils.Const.ScoreColumnKind.BinaryClassification:
                     var binaryCombiner = combiner as IBinaryOutputCombiner;
                     if (binaryCombiner == null)
                         throw env.Except("Combiner type incompatible with score column kind");
                     return new ImplOneWithCalibrator(env, predictors, binaryCombiner);
-                case MetadataUtils.Const.ScoreColumnKind.Regression:
-                case MetadataUtils.Const.ScoreColumnKind.AnomalyDetection:
+                case AnnotationUtils.Const.ScoreColumnKind.Regression:
+                case AnnotationUtils.Const.ScoreColumnKind.AnomalyDetection:
                     var regressionCombiner = combiner as IRegressionOutputCombiner;
                     if (regressionCombiner == null)
                         throw env.Except("Combiner type incompatible with score column kind");
                     return new ImplOne(env, predictors, regressionCombiner, scoreColumnKind);
-                case MetadataUtils.Const.ScoreColumnKind.MultiClassClassification:
-                    var vectorCombiner = combiner as IMultiClassOutputCombiner;
+                case AnnotationUtils.Const.ScoreColumnKind.MulticlassClassification:
+                    var vectorCombiner = combiner as IMulticlassOutputCombiner;
                     if (vectorCombiner == null)
                         throw env.Except("Combiner type incompatible with score column kind");
                     return new ImplVec(env, predictors, vectorCombiner);
@@ -550,12 +550,12 @@ namespace Microsoft.ML.Trainers.Ensemble
             var scoreColumnKind = ctx.LoadNonEmptyString();
             switch (scoreColumnKind)
             {
-                case MetadataUtils.Const.ScoreColumnKind.BinaryClassification:
+                case AnnotationUtils.Const.ScoreColumnKind.BinaryClassification:
                     return new ImplOneWithCalibrator(env, ctx, scoreColumnKind);
-                case MetadataUtils.Const.ScoreColumnKind.Regression:
-                case MetadataUtils.Const.ScoreColumnKind.AnomalyDetection:
+                case AnnotationUtils.Const.ScoreColumnKind.Regression:
+                case AnnotationUtils.Const.ScoreColumnKind.AnomalyDetection:
                     return new ImplOne(env, ctx, scoreColumnKind);
-                case MetadataUtils.Const.ScoreColumnKind.MultiClassClassification:
+                case AnnotationUtils.Const.ScoreColumnKind.MulticlassClassification:
                     return new ImplVec(env, ctx, scoreColumnKind);
                 default:
                     throw env.Except("Unknown score kind");
@@ -599,17 +599,17 @@ namespace Microsoft.ML.Trainers.Ensemble
             var labelCol = rmd.Schema.Label.Value;
 
             var labelType = labelCol.Type;
-            if (!(labelType is KeyType labelKeyType))
+            if (!(labelType is KeyDataViewType labelKeyType))
                 return CheckNonKeyLabelColumnCore(env, pred, models, isBinary, labelType);
 
             if (isBinary && labelKeyType.Count != 2)
                 throw env.Except("Label is not binary");
             var schema = rmd.Schema.Schema;
-            var mdType = labelCol.Metadata.Schema.GetColumnOrNull(MetadataUtils.Kinds.KeyValues)?.Type as VectorType;
+            var mdType = labelCol.Annotations.Schema.GetColumnOrNull(AnnotationUtils.Kinds.KeyValues)?.Type as VectorDataViewType;
             if (mdType == null || !mdType.IsKnownSize)
                 throw env.Except("Label column of type key must have a vector of key values metadata");
 
-            return Utils.MarshalInvoke(CheckKeyLabelColumnCore<int>, mdType.ItemType.RawType, env, models, (KeyType)labelType, schema, labelCol.Index, mdType);
+            return Utils.MarshalInvoke(CheckKeyLabelColumnCore<int>, mdType.ItemType.RawType, env, models, (KeyDataViewType)labelType, schema, labelCol.Index, mdType);
         }
 
         // When the label column is not a key, we check that the number of classes is the same for all the predictors, by checking the
@@ -617,7 +617,7 @@ namespace Microsoft.ML.Trainers.Ensemble
         // If any of the predictors do not implement IValueMapper we throw an exception. Returns the class count.
         private static int CheckNonKeyLabelColumnCore(IHostEnvironment env, IPredictor pred, PredictorModel[] models, bool isBinary, DataViewType labelType)
         {
-            env.Assert(!(labelType is KeyType));
+            env.Assert(!(labelType is KeyDataViewType));
             env.AssertNonEmpty(models);
 
             if (isBinary)
@@ -642,7 +642,7 @@ namespace Microsoft.ML.Trainers.Ensemble
 
         // Checks that all the label columns of the model have the same key type as their label column - including the same
         // cardinality and the same key values, and returns the cardinality of the label column key.
-        private static int CheckKeyLabelColumnCore<T>(IHostEnvironment env, PredictorModel[] models, KeyType labelType, DataViewSchema schema, int labelIndex, VectorType keyValuesType)
+        private static int CheckKeyLabelColumnCore<T>(IHostEnvironment env, PredictorModel[] models, KeyDataViewType labelType, DataViewSchema schema, int labelIndex, VectorDataViewType keyValuesType)
             where T : IEquatable<T>
         {
             env.Assert(keyValuesType.ItemType.RawType == typeof(T));
@@ -662,11 +662,11 @@ namespace Microsoft.ML.Trainers.Ensemble
                     throw env.Except("Training schema for model {0} does not have a label column", i);
                 var labelCol = rmd.Schema.Label.Value;
 
-                var curLabelType = labelCol.Type as KeyType;
+                var curLabelType = labelCol.Type as KeyDataViewType;
                 if (!labelType.Equals(curLabelType))
                     throw env.Except("Label column of model {0} has different type than model 0", i);
 
-                var mdType = labelCol.Metadata.Schema.GetColumnOrNull(MetadataUtils.Kinds.KeyValues)?.Type;
+                var mdType = labelCol.Annotations.Schema.GetColumnOrNull(AnnotationUtils.Kinds.KeyValues)?.Type;
                 if (!mdType.Equals(keyValuesType))
                     throw env.Except("Label column of model {0} has different key value type than model 0", i);
                 labelCol.GetKeyValues(ref curLabelNames);

@@ -16,6 +16,7 @@ namespace Microsoft.ML.RunTests
         public string labelFilename;
         public char fileSeparator;
         public bool fileHasHeader;
+        public bool allowQuoting;
 
         // REVIEW: Replace these with appropriate SubComponents!
         public string settings;
@@ -166,18 +167,18 @@ namespace Microsoft.ML.RunTests
             GetLoaderColumns = () =>
             {
                 return new[] {
-                    new TextLoader.Column("MedianHomeValue", DataKind.R4, 0),
-                    new TextLoader.Column("CrimesPerCapita", DataKind.R4, 1),
-                    new TextLoader.Column("PercentResidental", DataKind.R4, 2),
-                    new TextLoader.Column("PercentNonRetail", DataKind.R4, 3),
-                    new TextLoader.Column("CharlesRiver", DataKind.R4, 4),
-                    new TextLoader.Column("NitricOxides", DataKind.R4, 5),
-                    new TextLoader.Column("RoomsPerDwelling", DataKind.R4, 6),
-                    new TextLoader.Column("PercentPre40s", DataKind.R4, 7),
-                    new TextLoader.Column("EmploymentDistance", DataKind.R4, 8),
-                    new TextLoader.Column("HighwayDistance", DataKind.R4, 9),
-                    new TextLoader.Column("TaxRate", DataKind.R4, 10),
-                    new TextLoader.Column("TeacherRatio", DataKind.R4, 11),
+                    new TextLoader.Column("MedianHomeValue", DataKind.Single, 0),
+                    new TextLoader.Column("CrimesPerCapita", DataKind.Single, 1),
+                    new TextLoader.Column("PercentResidental", DataKind.Single, 2),
+                    new TextLoader.Column("PercentNonRetail", DataKind.Single, 3),
+                    new TextLoader.Column("CharlesRiver", DataKind.Single, 4),
+                    new TextLoader.Column("NitricOxides", DataKind.Single, 5),
+                    new TextLoader.Column("RoomsPerDwelling", DataKind.Single, 6),
+                    new TextLoader.Column("PercentPre40s", DataKind.Single, 7),
+                    new TextLoader.Column("EmploymentDistance", DataKind.Single, 8),
+                    new TextLoader.Column("HighwayDistance", DataKind.Single, 9),
+                    new TextLoader.Column("TaxRate", DataKind.Single, 10),
+                    new TextLoader.Column("TeacherRatio", DataKind.Single, 11),
                 };
             }
         };
@@ -212,12 +213,13 @@ namespace Microsoft.ML.RunTests
             testFilename = "wikipedia-detox-250-line-test.tsv",
             fileHasHeader = true,
             fileSeparator = '\t',
+            allowQuoting = true,
             GetLoaderColumns = () =>
              {
                  return new[]
                  {
-                    new TextLoader.Column("Label", DataKind.BL, 0),
-                    new TextLoader.Column("SentimentText", DataKind.Text, 1)
+                    new TextLoader.Column("Label", DataKind.Boolean, 0),
+                    new TextLoader.Column("SentimentText", DataKind.String, 1)
                  };
              }
         };
@@ -276,6 +278,8 @@ namespace Microsoft.ML.RunTests
             name = "Census",
             trainFilename = "adult.tiny.with-schema.txt",
             testFilename = "adult.tiny.with-schema.txt",
+            fileHasHeader = true,
+            fileSeparator = '\t',
             loaderSettings = "loader=Text{header+ col=Label:0 col=Num:9-14 col=Cat:TX:1-8}",
             mamlExtraSettings = new[] { "xf=Cat{col=Cat}", "xf=Concat{col=Features:Num,Cat}" },
             extraSettings = @"/inst Text{header+ sep=, label=14 handler=Categorical{cols=5-9,1,13,3}}",
@@ -404,11 +408,11 @@ namespace Microsoft.ML.RunTests
             {
                 return new[]
                 {
-                    new TextLoader.Column("SepalLength", DataKind.R4, 0),
-                    new TextLoader.Column("SepalWidth", DataKind.R4, 1),
-                    new TextLoader.Column("PetalLength", DataKind.R4, 2),
-                    new TextLoader.Column("PetalWidth",DataKind.R4, 3),
-                    new TextLoader.Column("Label", DataKind.Text, 4)
+                    new TextLoader.Column("SepalLength", DataKind.Single, 0),
+                    new TextLoader.Column("SepalWidth", DataKind.Single, 1),
+                    new TextLoader.Column("PetalLength", DataKind.Single, 2),
+                    new TextLoader.Column("PetalWidth",DataKind.Single, 3),
+                    new TextLoader.Column("Label", DataKind.String, 4)
                 };
             }
         };
@@ -454,7 +458,15 @@ namespace Microsoft.ML.RunTests
             trainFilename = @"iris.txt",
             testFilename = @"iris.txt",
             fileHasHeader = true,
-            fileSeparator = '\t'
+            fileSeparator = '\t',
+            mamlExtraSettings = new[] { "xf=Term{col=Label}" }
+        };
+
+        public static TestDataset irisDb = new TestDataset()
+        {
+            name = "iris",
+            trainFilename = @"iris-train",
+            testFilename = @"iris-test",
         };
 
         public static TestDataset irisMissing = new TestDataset()

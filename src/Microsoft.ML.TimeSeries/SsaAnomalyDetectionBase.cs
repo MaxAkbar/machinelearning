@@ -4,11 +4,10 @@
 
 using System;
 using System.IO;
-using Microsoft.Data.DataView;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Model;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML.Transforms.TimeSeries
 {
@@ -59,23 +58,23 @@ namespace Microsoft.ML.Transforms.TimeSeries
         {
             switch (errorFunction)
             {
-            case ErrorFunction.SignedDifference:
-                return SignedDifference;
+                case ErrorFunction.SignedDifference:
+                    return SignedDifference;
 
-            case ErrorFunction.AbsoluteDifference:
-                return AbsoluteDifference;
+                case ErrorFunction.AbsoluteDifference:
+                    return AbsoluteDifference;
 
-            case ErrorFunction.SignedProportion:
-                return SignedProportion;
+                case ErrorFunction.SignedProportion:
+                    return SignedProportion;
 
-            case ErrorFunction.AbsoluteProportion:
-                return AbsoluteProportion;
+                case ErrorFunction.AbsoluteProportion:
+                    return AbsoluteProportion;
 
-            case ErrorFunction.SquaredDifference:
-                return SquaredDifference;
+                case ErrorFunction.SquaredDifference:
+                    return SquaredDifference;
 
-            default:
-                throw Contracts.Except(ErrorFunctionHelpText);
+                default:
+                    throw Contracts.Except(ErrorFunctionHelpText);
             }
         }
     }
@@ -87,13 +86,13 @@ namespace Microsoft.ML.Transforms.TimeSeries
     public class SsaAnomalyDetectionBaseWrapper : IStatefulTransformer, ICanSaveModel
     {
         /// <summary>
-        /// Whether a call to <see cref="GetRowToRowMapper(DataViewSchema)"/> should succeed, on an
+        /// Whether a call to <see cref="ITransformer.GetRowToRowMapper(DataViewSchema)"/> should succeed, on an
         /// appropriate schema.
         /// </summary>
-        public bool IsRowToRowMapper => InternalTransform.IsRowToRowMapper;
+        bool ITransformer.IsRowToRowMapper => ((ITransformer)InternalTransform).IsRowToRowMapper;
 
         /// <summary>
-        /// Creates a clone of the transfomer. Used for taking the snapshot of the state.
+        /// Creates a clone of the transformer. Used for taking the snapshot of the state.
         /// </summary>
         /// <returns></returns>
         IStatefulTransformer IStatefulTransformer.Clone() => InternalTransform.Clone();
@@ -105,20 +104,22 @@ namespace Microsoft.ML.Transforms.TimeSeries
         public DataViewSchema GetOutputSchema(DataViewSchema inputSchema) => InternalTransform.GetOutputSchema(inputSchema);
 
         /// <summary>
-        /// Constructs a row-to-row mapper based on an input schema. If <see cref="IsRowToRowMapper"/>
+        /// Constructs a row-to-row mapper based on an input schema. If <see cref="ITransformer.IsRowToRowMapper"/>
         /// is <c>false</c>, then an exception should be thrown. If the input schema is in any way
         /// unsuitable for constructing the mapper, an exception should likewise be thrown.
         /// </summary>
         /// <param name="inputSchema">The input schema for which we should get the mapper.</param>
         /// <returns>The row to row mapper.</returns>
-        public IRowToRowMapper GetRowToRowMapper(DataViewSchema inputSchema) => InternalTransform.GetRowToRowMapper(inputSchema);
+        IRowToRowMapper ITransformer.GetRowToRowMapper(DataViewSchema inputSchema)
+            => ((ITransformer)InternalTransform).GetRowToRowMapper(inputSchema);
 
         /// <summary>
         /// Same as <see cref="ITransformer.GetRowToRowMapper(DataViewSchema)"/> but also supports mechanism to save the state.
         /// </summary>
         /// <param name="inputSchema">The input schema for which we should get the mapper.</param>
         /// <returns>The row to row mapper.</returns>
-        public IRowToRowMapper GetStatefulRowToRowMapper(DataViewSchema inputSchema) => ((IStatefulTransformer)InternalTransform).GetStatefulRowToRowMapper(inputSchema);
+        public IRowToRowMapper GetStatefulRowToRowMapper(DataViewSchema inputSchema)
+            => ((IStatefulTransformer)InternalTransform).GetStatefulRowToRowMapper(inputSchema);
 
         /// <summary>
         /// Take the data in, make transformations, output the data.
@@ -129,7 +130,9 @@ namespace Microsoft.ML.Transforms.TimeSeries
         /// <summary>
         /// For saving a model into a repository.
         /// </summary>
-        public virtual void Save(ModelSaveContext ctx) => InternalTransform.SaveThis(ctx);
+        void ICanSaveModel.Save(ModelSaveContext ctx) => SaveModel(ctx);
+
+        private protected virtual void SaveModel(ModelSaveContext ctx) => InternalTransform.SaveThis(ctx);
 
         /// <summary>
         /// Creates a row mapper from Schema.
@@ -198,8 +201,8 @@ namespace Microsoft.ML.Transforms.TimeSeries
                 ErrorFunc = ErrorFunctionUtils.GetErrorFunction(ErrorFunction);
                 IsAdaptive = options.IsAdaptive;
                 // Creating the master SSA model
-                Model = new AdaptiveSingularSpectrumSequenceModeler(Host, options.InitialWindowSize, SeasonalWindowSize + 1, SeasonalWindowSize,
-                    DiscountFactor, AdaptiveSingularSpectrumSequenceModeler.RankSelectionMethod.Exact, null, SeasonalWindowSize / 2, false, false);
+                Model = new AdaptiveSingularSpectrumSequenceModelerInternal(Host, options.InitialWindowSize, SeasonalWindowSize + 1, SeasonalWindowSize,
+                    DiscountFactor, RankSelectionMethod.Exact, null, SeasonalWindowSize / 2, false, false);
 
                 StateRef = new State();
                 StateRef.InitState(WindowSize, InitialWindowSize, this, Host);
@@ -248,14 +251,14 @@ namespace Microsoft.ML.Transforms.TimeSeries
 
                 var colType = inputSchema[col].Type;
                 if (colType != NumberDataViewType.Single)
-                    throw Host.ExceptSchemaMismatch(nameof(inputSchema), "input", InputColumnName, "float", colType.ToString());
+                    throw Host.ExceptSchemaMismatch(nameof(inputSchema), "input", InputColumnName, "Single", colType.ToString());
 
                 return Transform(new EmptyDataView(Host, inputSchema)).Schema;
             }
 
             private protected override void SaveModel(ModelSaveContext ctx)
             {
-                Parent.Save(ctx);
+                ((ICanSaveModel)Parent).Save(ctx);
             }
 
             internal void SaveThis(ModelSaveContext ctx)
@@ -337,7 +340,7 @@ namespace Microsoft.ML.Transforms.TimeSeries
 
                 private protected override double ComputeRawAnomalyScore(ref Single input, FixedSizeQueue<Single> windowedBuffer, long iteration)
                 {
-                    // Get the prediction for the next point opn the series
+                    // Get the prediction for the next point in the series
                     Single expectedValue = 0;
                     _model.PredictNext(ref expectedValue);
 

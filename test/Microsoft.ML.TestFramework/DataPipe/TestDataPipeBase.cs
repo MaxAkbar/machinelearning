@@ -7,12 +7,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using Microsoft.Data.DataView;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
 using Microsoft.ML.Data.IO;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Model;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.TestFramework;
 using Xunit;
 
@@ -80,12 +79,12 @@ namespace Microsoft.ML.RunTests
             var transformer = estimator.Fit(validFitInput);
             // Save and reload.
             string modelPath = GetOutputPath(FullTestName + "-model.zip");
-            using (var fs = File.Create(modelPath))
-                ML.Model.Save(transformer, fs);
+            ML.Model.Save(transformer, validFitInput.Schema, modelPath);
 
             ITransformer loadedTransformer;
+            DataViewSchema loadedInputSchema;
             using (var fs = File.OpenRead(modelPath))
-                loadedTransformer = ML.Model.Load(fs);
+                loadedTransformer = ML.Model.Load(fs, out loadedInputSchema);
             DeleteOutputPath(modelPath);
 
             // Run on train data.
@@ -107,6 +106,8 @@ namespace Microsoft.ML.RunTests
 
                 // Loaded transformer needs to have the same schema propagation.
                 CheckSameSchemas(schema, loadedTransformer.GetOutputSchema(data.Schema));
+                // Loaded schema needs to have the same schema as data.
+                CheckSameSchemas(data.Schema, loadedInputSchema);
 
                 var scoredTrain = transformer.Transform(data);
                 var scoredTrain2 = loadedTransformer.Transform(data);
@@ -150,14 +151,18 @@ namespace Microsoft.ML.RunTests
         private void CheckSameSchemaShape(SchemaShape promised, SchemaShape delivered)
         {
             Assert.True(promised.Count == delivered.Count);
-            var sortedCols1 = promised.OrderBy(x => x.Name);
-            var sortedCols2 = delivered.OrderBy(x => x.Name);
+            var promisedCols = promised.OrderBy(x => x.Name);
+            var deliveredCols = delivered.OrderBy(x => x.Name);
 
-            foreach (var (x, y) in sortedCols1.Zip(sortedCols2, (x, y) => (x, y)))
+            foreach (var (p, d) in promisedCols.Zip(deliveredCols, (p, d) => (p, d)))
             {
-                Assert.Equal(x.Name, y.Name);
+                Assert.Equal(p.Name, d.Name);
                 // We want the 'promised' metadata to be a superset of 'delivered'.
-                Assert.True(y.IsCompatibleWith(x), $"Mismatch on {x.Name}");
+                Assert.True(d.IsCompatibleWith(p), $"Mismatch on {p.Name}, there was a mismatch, or some unexpected annotations was present.");
+                // We also want the 'delivered' to be a superset of 'promised'. Since the above
+                // test must have worked if we got this far, I believe the only plausible reason
+                // this could happen is if there was something promised but not delivered.
+                Assert.True(p.IsCompatibleWith(d), $"Mismatch on {p.Name}, something was promised in the annotations but not delivered.");
             }
         }
 
@@ -168,21 +173,22 @@ namespace Microsoft.ML.RunTests
         /// * pathData defaults to breast-cancer.txt.
         /// * actLoader is invoked for extra validation (if non-null).
         /// </summary>
-        internal IDataLoader TestCore(string pathData, bool keepHidden, string[] argsPipe,
-            Action<IDataLoader> actLoader = null, string suffix = "", string suffixBase = null, bool checkBaseline = true,
+        internal ILegacyDataLoader TestCore(string pathData, bool keepHidden, string[] argsPipe,
+            Action<ILegacyDataLoader> actLoader = null, string suffix = "", string suffixBase = null, bool checkBaseline = true,
             bool forceDense = false, bool logCurs = false, bool roundTripText = true,
-            bool checkTranspose = false, bool checkId = true, bool baselineSchema = true, int digitsOfPrecision = DigitsOfPrecision)
+            bool checkTranspose = false, bool checkId = true, bool baselineSchema = true, int digitsOfPrecision = DigitsOfPrecision,
+            NumberParseOption parseOption = NumberParseOption.Default)
         {
             Contracts.AssertValue(Env);
 
             MultiFileSource files;
-            IDataLoader compositeLoader;
+            ILegacyDataLoader compositeLoader;
             var pipe1 = compositeLoader = CreatePipeDataLoader(_env, pathData, argsPipe, out files);
 
             actLoader?.Invoke(compositeLoader);
 
             // Re-apply pipe to the loader and check equality.
-            var comp = compositeLoader as CompositeDataLoader;
+            var comp = compositeLoader as LegacyCompositeDataLoader;
             IDataView srcLoader = null;
             if (comp != null)
             {
@@ -208,9 +214,6 @@ namespace Microsoft.ML.RunTests
                 using (_env.RedirectChannelOutput(writer, writer))
                 {
                     long count = 0;
-                    // Set the concurrency to 1 for this; restore later.
-                    int conc = _env.ConcurrencyFactor;
-                    _env.ConcurrencyFactor = 1;
                     using (var curs = pipe1.GetRowCursorForAllColumns())
                     {
                         while (curs.MoveNext())
@@ -219,10 +222,9 @@ namespace Microsoft.ML.RunTests
                         }
                     }
                     writer.WriteLine("Cursored through {0} rows", count);
-                    _env.ConcurrencyFactor = conc;
                 }
 
-                CheckEqualityNormalized("SavePipe", name, digitsOfPrecision: digitsOfPrecision);
+                CheckEqualityNormalized("SavePipe", name, digitsOfPrecision: digitsOfPrecision, parseOption: parseOption);
             }
 
             var pathModel = SavePipe(pipe1, suffix);
@@ -238,8 +240,11 @@ namespace Microsoft.ML.RunTests
             if (pipe1.Schema.Count > 0)
             {
                 // The text saver fails if there are no columns, so we cannot check in that case.
-                if (!SaveLoadText(pipe1, _env, keepHidden, suffix, suffixBase, checkBaseline, forceDense, roundTripText, digitsOfPrecision: digitsOfPrecision))
+                if (!SaveLoadText(pipe1, _env, keepHidden, suffix, suffixBase, checkBaseline, forceDense,
+                        roundTripText, digitsOfPrecision: digitsOfPrecision, parseOption: parseOption))
+                {
                     Failed();
+                }
                 // The transpose saver likewise fails for the same reason.
                 if (checkTranspose && !SaveLoadTransposed(pipe1, _env, suffix))
                     Failed();
@@ -279,7 +284,7 @@ namespace Microsoft.ML.RunTests
                         new ShowSchemaCommand.Arguments() { ShowMetadataValues = true, ShowSteps = true },
                         pipe1);
                 }
-                if (!CheckEquality("SavePipe", name, digitsOfPrecision: digitsOfPrecision))
+                if (!CheckEquality("SavePipe", name, digitsOfPrecision: digitsOfPrecision, parseOption: parseOption))
                     Log("*** ShowSchema failed on pipe1");
                 else
                 {
@@ -290,7 +295,7 @@ namespace Microsoft.ML.RunTests
                             new ShowSchemaCommand.Arguments() { ShowMetadataValues = true, ShowSteps = true },
                             pipe2);
                     }
-                    if (!CheckEquality("SavePipe", name, digitsOfPrecision: digitsOfPrecision))
+                    if (!CheckEquality("SavePipe", name, digitsOfPrecision: digitsOfPrecision, parseOption: parseOption))
                         Log("*** ShowSchema failed on pipe2");
                 }
             }
@@ -300,7 +305,7 @@ namespace Microsoft.ML.RunTests
             return pipe1;
         }
 
-        private IDataLoader CreatePipeDataLoader(IHostEnvironment env, string pathData, string[] argsPipe, out MultiFileSource files)
+        private ILegacyDataLoader CreatePipeDataLoader(IHostEnvironment env, string pathData, string[] argsPipe, out MultiFileSource files)
         {
             VerifyArgParsing(env, argsPipe);
 
@@ -309,7 +314,7 @@ namespace Microsoft.ML.RunTests
                 pathData = GetDataPath("breast-cancer.txt");
 
             files = new MultiFileSource(pathData == "<none>" ? null : pathData);
-            var sub = new SubComponent<IDataLoader, SignatureDataLoader>("Pipe", argsPipe);
+            var sub = new SubComponent<ILegacyDataLoader, SignatureDataLoader>("Pipe", argsPipe);
             var pipe = sub.CreateInstance(env, files);
             if (!CheckMetadataTypes(pipe.Schema))
                 Failed();
@@ -320,7 +325,7 @@ namespace Microsoft.ML.RunTests
         protected void VerifyArgParsing(IHostEnvironment env, string[] strs)
         {
             string str = CmdParser.CombineSettings(strs);
-            var args = new CompositeDataLoader.Arguments();
+            var args = new LegacyCompositeDataLoader.Arguments();
             if (!CmdParser.ParseArguments(Env, str, args))
             {
                 Fail("Parsing arguments failed!");
@@ -367,7 +372,8 @@ namespace Microsoft.ML.RunTests
         protected bool SaveLoadText(IDataView view, IHostEnvironment env,
             bool hidden = true, string suffix = "", string suffixBase = null,
             bool checkBaseline = true, bool forceDense = false, bool roundTrip = true,
-            bool outputSchema = true, bool outputHeader = true, int digitsOfPrecision = DigitsOfPrecision)
+            bool outputSchema = true, bool outputHeader = true, int digitsOfPrecision = DigitsOfPrecision,
+            NumberParseOption parseOption = NumberParseOption.Default)
         {
             TextSaver saver = new TextSaver(env, new TextSaver.Arguments() { Dense = forceDense, OutputSchema = outputSchema, OutputHeader = outputHeader });
             var schema = view.Schema;
@@ -389,7 +395,7 @@ namespace Microsoft.ML.RunTests
             if (checkBaseline)
             {
                 string nameBase = suffixBase != null ? TestName + suffixBase + "-Data" + ".txt" : name;
-                CheckEquality("SavePipe", name, nameBase, digitsOfPrecision: digitsOfPrecision);
+                CheckEquality("SavePipe", name, nameBase, digitsOfPrecision: digitsOfPrecision, parseOption: parseOption);
             }
 
             if (!roundTrip)
@@ -412,7 +418,7 @@ namespace Microsoft.ML.RunTests
 
             // Note that we don't pass in "args", but pass in a default args so we test
             // the auto-schema parsing.
-            var loadedData = ML.Data.ReadFromTextFile(pathData, options: args);
+            var loadedData = ML.Data.LoadFromTextFile(pathData, options: args);
             if (!CheckMetadataTypes(loadedData.Schema))
                 Failed();
 
@@ -423,7 +429,7 @@ namespace Microsoft.ML.RunTests
             return true;
         }
 
-        protected private string SavePipe(IDataLoader pipe, string suffix = "", string dir = "Pipeline")
+        protected private string SavePipe(ILegacyDataLoader pipe, string suffix = "", string dir = "Pipeline")
         {
             string name = TestName + suffix + ".zip";
             string pathModel = DeleteOutputPath("SavePipe", name);
@@ -446,14 +452,14 @@ namespace Microsoft.ML.RunTests
             return res;
         }
 
-        private IDataLoader LoadPipe(string pathModel, IHostEnvironment env, IMultiStreamSource files)
+        private ILegacyDataLoader LoadPipe(string pathModel, IHostEnvironment env, IMultiStreamSource files)
         {
             using (var file = Env.OpenInputFile(pathModel))
             using (var strm = file.OpenReadStream())
             using (var rep = RepositoryReader.Open(strm, env))
             {
-                IDataLoader pipe;
-                ModelLoadContext.LoadModel<IDataLoader, SignatureLoadDataLoader>(env,
+                ILegacyDataLoader pipe;
+                ModelLoadContext.LoadModel<ILegacyDataLoader, SignatureLoadDataLoader>(env,
                     out pipe, rep, "Pipeline", files);
                 return pipe;
             }
@@ -464,11 +470,11 @@ namespace Microsoft.ML.RunTests
             var hs = new HashSet<string>();
             for (int col = 0; col < sch.Count; col++)
             {
-                var typeSlot = sch[col].Metadata.Schema.GetColumnOrNull(MetadataUtils.Kinds.SlotNames)?.Type;
-                var typeKeys = sch[col].Metadata.Schema.GetColumnOrNull(MetadataUtils.Kinds.KeyValues)?.Type;
+                var typeSlot = sch[col].Annotations.Schema.GetColumnOrNull(AnnotationUtils.Kinds.SlotNames)?.Type;
+                var typeKeys = sch[col].Annotations.Schema.GetColumnOrNull(AnnotationUtils.Kinds.KeyValues)?.Type;
 
                 hs.Clear();
-                foreach (var metaColumn in sch[col].Metadata.Schema)
+                foreach (var metaColumn in sch[col].Annotations.Schema)
                 {
                     if (metaColumn.Name == null || metaColumn.Type == null)
                     {
@@ -480,7 +486,7 @@ namespace Microsoft.ML.RunTests
                         Fail("Duplicate metadata type: {0}", metaColumn.Name);
                         return Failed();
                     }
-                    if (metaColumn.Name == MetadataUtils.Kinds.SlotNames)
+                    if (metaColumn.Name == AnnotationUtils.Kinds.SlotNames)
                     {
                         if (typeSlot == null || !typeSlot.Equals(metaColumn.Type))
                         {
@@ -490,7 +496,7 @@ namespace Microsoft.ML.RunTests
                         typeSlot = null;
                         continue;
                     }
-                    if (metaColumn.Name == MetadataUtils.Kinds.KeyValues)
+                    if (metaColumn.Name == AnnotationUtils.Kinds.KeyValues)
                     {
                         if (typeKeys == null || !typeKeys.Equals(metaColumn.Type))
                         {
@@ -553,15 +559,15 @@ namespace Microsoft.ML.RunTests
                 if (!CheckMetadataNames("PurpleDragonScales", 0, sch1, sch2, col, exactTypes, true))
                     return Failed();
 
-                ulong vsize = type1 is VectorType vectorType ? (ulong)vectorType.Size : 0;
-                if (!CheckMetadataNames(MetadataUtils.Kinds.SlotNames, vsize, sch1, sch2, col, exactTypes, true))
+                ulong vsize = type1 is VectorDataViewType vectorType ? (ulong)vectorType.Size : 0;
+                if (!CheckMetadataNames(AnnotationUtils.Kinds.SlotNames, vsize, sch1, sch2, col, exactTypes, true))
                     return Failed();
 
                 if (!keyNames)
                     continue;
 
-                ulong ksize = type1.GetItemType() is KeyType keyType ? keyType.Count : 0;
-                if (!CheckMetadataNames(MetadataUtils.Kinds.KeyValues, ksize, sch1, sch2, col, exactTypes, false))
+                ulong ksize = type1.GetItemType() is KeyDataViewType keyType ? keyType.Count : 0;
+                if (!CheckMetadataNames(AnnotationUtils.Kinds.KeyValues, ksize, sch1, sch2, col, exactTypes, false))
                     return Failed();
             }
 
@@ -573,8 +579,8 @@ namespace Microsoft.ML.RunTests
             var names1 = default(VBuffer<ReadOnlyMemory<char>>);
             var names2 = default(VBuffer<ReadOnlyMemory<char>>);
 
-            var t1 = sch1[col].Metadata.Schema.GetColumnOrNull(kind)?.Type;
-            var t2 = sch2[col].Metadata.Schema.GetColumnOrNull(kind)?.Type;
+            var t1 = sch1[col].Annotations.Schema.GetColumnOrNull(kind)?.Type;
+            var t2 = sch2[col].Annotations.Schema.GetColumnOrNull(kind)?.Type;
             if ((t1 == null) != (t2 == null))
             {
                 Fail("Different null-ness of {0} metadata types", kind);
@@ -589,7 +595,7 @@ namespace Microsoft.ML.RunTests
                 return true;
             }
             if (size > int.MaxValue)
-                Fail(nameof(KeyType) + "." + nameof(KeyType.Count) + "is larger than int.MaxValue");
+                Fail(nameof(KeyDataViewType) + "." + nameof(KeyDataViewType.Count) + "is larger than int.MaxValue");
             if (!EqualTypes(t1, t2, exactTypes))
             {
                 Fail("Different {0} metadata types: {0} vs {1}", kind, t1, t2);
@@ -612,8 +618,8 @@ namespace Microsoft.ML.RunTests
                 return Failed();
             }
 
-            sch1[col].Metadata.GetValue(kind, ref names1);
-            sch2[col].Metadata.GetValue(kind, ref names2);
+            sch1[col].Annotations.GetValue(kind, ref names1);
+            sch2[col].Annotations.GetValue(kind, ref names2);
             if (!CompareVec(in names1, in names2, (int)size, (a, b) => a.Span.SequenceEqual(b.Span)))
             {
                 Fail("Different {0} metadata values", kind);
@@ -626,15 +632,15 @@ namespace Microsoft.ML.RunTests
         {
             try
             {
-                sch[col].Metadata.GetValue(kind, ref names);
+                sch[col].Annotations.GetValue(kind, ref names);
                 Fail("Getting {0} metadata unexpectedly succeeded", kind);
                 return Failed();
             }
             catch (InvalidOperationException ex)
             {
-                if (ex.Message != "Invalid call to GetMetadata")
+                if (ex.Message != "Invalid call to 'GetValue'")
                 {
-                    Fail("Message from GetMetadata failed call doesn't match expected message: {0}", ex.Message);
+                    Fail("Message from GetValue failed call doesn't match expected message: {0}", ex.Message);
                     return Failed();
                 }
             }
@@ -829,8 +835,8 @@ namespace Microsoft.ML.RunTests
             Func<bool>[] comps = new Func<bool>[colLim];
             for (int col = 0; col < colLim; col++)
             {
-                var f1 = curs1.IsColumnActive(col);
-                var f2 = curs2.IsColumnActive(col);
+                var f1 = curs1.IsColumnActive(curs1.Schema[col]);
+                var f2 = curs2.IsColumnActive(curs2.Schema[col]);
 
                 if (f1 && f2)
                 {
@@ -913,7 +919,7 @@ namespace Microsoft.ML.RunTests
                 for (int col = 0; col < colLim; col++)
                 {
                     // curs1 should have all columns active (for simplicity of the code here).
-                    Contracts.Assert(curs1.IsColumnActive(col));
+                    Contracts.Assert(curs1.IsColumnActive(curs1.Schema[col]));
                     cursors[col] = view2.GetRowCursorForAllColumns();
                 }
 
@@ -1002,7 +1008,7 @@ namespace Microsoft.ML.RunTests
 
         protected Func<bool> GetColumnComparer(DataViewRow r1, DataViewRow r2, int col, DataViewType type, bool exactDoubles)
         {
-            if (!(type is VectorType vectorType))
+            if (!(type is VectorDataViewType vectorType))
             {
                 Type rawType = type.RawType;
                 if (rawType == typeof(sbyte))
@@ -1116,8 +1122,8 @@ namespace Microsoft.ML.RunTests
 
         protected Func<bool> GetComparerOne<T>(DataViewRow r1, DataViewRow r2, int col, Func<T, T, bool> fn)
         {
-            var g1 = r1.GetGetter<T>(col);
-            var g2 = r2.GetGetter<T>(col);
+            var g1 = r1.GetGetter<T>(r1.Schema[col]);
+            var g2 = r2.GetGetter<T>(r2.Schema[col]);
             T v1 = default(T);
             T v2 = default(T);
             return
@@ -1133,8 +1139,8 @@ namespace Microsoft.ML.RunTests
 
         protected Func<bool> GetComparerVec<T>(DataViewRow r1, DataViewRow r2, int col, int size, Func<T, T, bool> fn)
         {
-            var g1 = r1.GetGetter<VBuffer<T>>(col);
-            var g2 = r2.GetGetter<VBuffer<T>>(col);
+            var g1 = r1.GetGetter<VBuffer<T>>(r1.Schema[col]);
+            var g2 = r2.GetGetter<VBuffer<T>>(r2.Schema[col]);
             var v1 = default(VBuffer<T>);
             var v2 = default(VBuffer<T>);
             return

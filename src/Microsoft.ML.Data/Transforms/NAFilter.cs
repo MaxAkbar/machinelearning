@@ -7,15 +7,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
-using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Model;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Transforms;
-using Float = System.Single;
 
 [assembly: LoadableClass(NAFilter.Summary, typeof(NAFilter), typeof(NAFilter.Arguments), typeof(SignatureDataTransform),
     NAFilter.FriendlyName, NAFilter.ShortName, "MissingValueFilter", "MissingFilter")]
@@ -179,7 +176,7 @@ namespace Microsoft.ML.Transforms
             // int: sizeof(Float)
             // int: number of columns
             // int[]: ids of column names
-            ctx.Writer.Write(sizeof(Float));
+            ctx.Writer.Write(sizeof(float));
             Host.Assert(_infos.Length > 0);
             ctx.Writer.Write(_infos.Length);
             foreach (var info in _infos)
@@ -190,12 +187,12 @@ namespace Microsoft.ML.Transforms
         {
             Contracts.AssertValue(type);
 
-            var itemType = (type as VectorType)?.ItemType ?? type;
+            var itemType = (type as VectorDataViewType)?.ItemType ?? type;
             if (itemType == NumberDataViewType.Single)
                 return true;
             if (itemType == NumberDataViewType.Double)
                 return true;
-            if (itemType is KeyType)
+            if (itemType is KeyDataViewType)
                 return true;
             return false;
         }
@@ -271,7 +268,7 @@ namespace Microsoft.ML.Transforms
                     Contracts.AssertValue(info);
 
                     MethodInfo meth;
-                    if (info.Type is VectorType vecType)
+                    if (info.Type is VectorDataViewType vecType)
                     {
                         Func<Cursor, ColInfo, ValueVec<int>> d = CreateVec<int>;
                         meth = d.GetMethodInfo().GetGenericMethodDefinition().MakeGenericMethod(vecType.ItemType.RawType);
@@ -288,10 +285,10 @@ namespace Microsoft.ML.Transforms
                 {
                     Contracts.AssertValue(cursor);
                     Contracts.AssertValue(info);
-                    Contracts.Assert(!(info.Type is VectorType));
+                    Contracts.Assert(!(info.Type is VectorDataViewType));
                     Contracts.Assert(info.Type.RawType == typeof(T));
 
-                    var getSrc = cursor.Input.GetGetter<T>(info.Index);
+                    var getSrc = cursor.Input.GetGetter<T>(cursor.Input.Schema[info.Index]);
                     var hasBad = Data.Conversion.Conversions.Instance.GetIsNAPredicate<T>(info.Type);
                     return new ValueOne<T>(cursor, getSrc, hasBad);
                 }
@@ -300,11 +297,11 @@ namespace Microsoft.ML.Transforms
                 {
                     Contracts.AssertValue(cursor);
                     Contracts.AssertValue(info);
-                    Contracts.Assert(info.Type is VectorType);
+                    Contracts.Assert(info.Type is VectorDataViewType);
                     Contracts.Assert(info.Type.RawType == typeof(VBuffer<T>));
 
-                    var getSrc = cursor.Input.GetGetter<VBuffer<T>>(info.Index);
-                    var hasBad = Data.Conversion.Conversions.Instance.GetHasMissingPredicate<T>((VectorType)info.Type);
+                    var getSrc = cursor.Input.GetGetter<VBuffer<T>>(cursor.Input.Schema[info.Index]);
+                    var hasBad = Data.Conversion.Conversions.Instance.GetHasMissingPredicate<T>((VectorDataViewType)info.Type);
                     return new ValueVec<T>(cursor, getSrc, hasBad);
                 }
 
@@ -387,14 +384,21 @@ namespace Microsoft.ML.Transforms
                     _values[i] = Value.Create(this, _parent._infos[i]);
             }
 
-            public override ValueGetter<TValue> GetGetter<TValue>(int col)
+            /// <summary>
+            /// Returns a value getter delegate to fetch the value of column with the given columnIndex, from the row.
+            /// This throws if the column is not active in this row, or if the type
+            /// <typeparamref name="TValue"/> differs from this column's type.
+            /// </summary>
+            /// <typeparam name="TValue"> is the column's content type.</typeparam>
+            /// <param name="column"> is the output column whose getter should be returned.</param>
+            public override ValueGetter<TValue> GetGetter<TValue>(DataViewSchema.Column column)
             {
-                Ch.Check(IsColumnActive(col));
+                Ch.Check(IsColumnActive(column));
 
                 ValueGetter<TValue> fn;
-                if (TryGetColumnValueGetter(col, out fn))
+                if (TryGetColumnValueGetter(column.Index, out fn))
                     return fn;
-                return Input.GetGetter<TValue>(col);
+                return Input.GetGetter<TValue>(column);
             }
 
             /// <summary>
@@ -405,7 +409,7 @@ namespace Microsoft.ML.Transforms
             /// </summary>
             private bool TryGetColumnValueGetter<TValue>(int col, out ValueGetter<TValue> fn)
             {
-                Ch.Assert(IsColumnActive(col));
+                Ch.Assert(IsColumnActive(Schema[col]));
 
                 int index;
                 if (!_parent._srcIndexToInfoIndex.TryGetValue(col, out index))

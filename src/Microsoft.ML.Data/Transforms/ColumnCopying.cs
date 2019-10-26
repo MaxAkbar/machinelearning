@@ -6,14 +6,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
-using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Model;
 using Microsoft.ML.Model.OnnxConverter;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Transforms;
 
 [assembly: LoadableClass(ColumnCopyingTransformer.Summary, typeof(IDataTransform), typeof(ColumnCopyingTransformer),
@@ -33,8 +31,25 @@ using Microsoft.ML.Transforms;
 namespace Microsoft.ML.Transforms
 {
     /// <summary>
-    /// <see cref="ColumnCopyingEstimator"/> copies the input column to another column named as specified in the parameters of the transformation.
+    /// <see cref="IEstimator{TTransformer}"/> for the <see cref="ColumnCopyingTransformer"/>.
     /// </summary>
+    /// <remarks>
+    /// <format type="text/markdown"><![CDATA[
+    ///
+    /// ###  Estimator Characteristics
+    /// |  |  |
+    /// | -- | -- |
+    /// | Does this estimator need to look at the data to train its parameters? | No |
+    /// | Input column data type | Any |
+    /// | Output column data type | The same as the data type in the input column |
+    ///
+    /// The resulting [ColumnCopyingTransformer](xref:Microsoft.ML.Transforms.ColumnCopyingTransformer) creates a new column, named as specified in the output column name parameters, and
+    /// copies the data from the input column to this new column.
+    /// Check the See Also section for links to usage examples.
+    /// ]]>
+    /// </format>
+    /// </remarks>
+    /// <seealso cref="TransformExtensionsCatalog.CopyColumns(TransformsCatalog, string, string)" />
     public sealed class ColumnCopyingEstimator : TrivialEstimator<ColumnCopyingTransformer>
     {
         [BestFriend]
@@ -62,13 +77,16 @@ namespace Microsoft.ML.Transforms
             {
                 if (!inputSchema.TryFindColumn(inputColumnName, out var originalColumn))
                     throw Host.ExceptSchemaMismatch(nameof(inputSchema), "input", inputColumnName);
-                var col = new SchemaShape.Column(outputColumnName, originalColumn.Kind, originalColumn.ItemType, originalColumn.IsKey, originalColumn.Metadata);
+                var col = new SchemaShape.Column(outputColumnName, originalColumn.Kind, originalColumn.ItemType, originalColumn.IsKey, originalColumn.Annotations);
                 resultDic[outputColumnName] = col;
             }
             return new SchemaShape(resultDic.Values);
         }
     }
 
+    /// <summary>
+    /// <see cref="ITransformer"/> resulting from fitting a <see cref="ColumnCopyingEstimator"/>.
+    /// </summary>
     public sealed class ColumnCopyingTransformer : OneToOneTransformerBase
     {
         [BestFriend]
@@ -80,7 +98,7 @@ namespace Microsoft.ML.Transforms
         /// <summary>
         /// Names of output and input column pairs on which the transformation is applied.
         /// </summary>
-        public IReadOnlyCollection<(string outputColumnName, string inputColumnName)> Columns => ColumnPairs.AsReadOnly();
+        internal IReadOnlyCollection<(string outputColumnName, string inputColumnName)> Columns => ColumnPairs.AsReadOnly();
 
         private static VersionInfo GetVersionInfo()
         {
@@ -195,7 +213,7 @@ namespace Microsoft.ML.Transforms
                 disposer = null;
 
                 Delegate MakeGetter<T>(DataViewRow row, int index)
-                    => input.GetGetter<T>(index);
+                    => input.GetGetter<T>(input.Schema[index]);
 
                 input.Schema.TryGetColumnIndex(_columns[iinfo].inputColumnName, out int colIndex);
                 var type = input.Schema[colIndex].Type;
@@ -208,7 +226,7 @@ namespace Microsoft.ML.Transforms
                 for (int i = 0; i < _columns.Length; i++)
                 {
                     var srcCol = _schema[_columns[i].inputColumnName];
-                    result[i] = new DataViewSchema.DetachedColumn(_columns[i].outputColumnName, srcCol.Type, srcCol.Metadata);
+                    result[i] = new DataViewSchema.DetachedColumn(_columns[i].outputColumnName, srcCol.Type, srcCol.Annotations);
                 }
                 return result;
             }

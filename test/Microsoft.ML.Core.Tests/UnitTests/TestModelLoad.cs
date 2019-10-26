@@ -22,7 +22,7 @@ namespace Microsoft.ML.RunTests
             using (var modelStream = File.OpenRead(Path.Combine("TestModels", "BinaryLoader-v3.11.0.0.zip")))
             using (var rep = RepositoryReader.Open(modelStream, env))
             {
-                IDataLoader result = ModelFileUtils.LoadLoader(env, rep, new MultiFileSource(null), true);
+                ILegacyDataLoader result = ModelFileUtils.LoadLoader(env, rep, new MultiFileSource(null), true);
 
                 Assert.Equal(2, result.Schema.Count);
                 Assert.Equal("Image", result.Schema[0].Name);
@@ -46,8 +46,8 @@ namespace Microsoft.ML.RunTests
                 Assert.Equal("Label", result.Schema[0].Name);
                 Assert.Equal("Features", result.Schema[1].Name);
                 Assert.Equal("Features", result.Schema[2].Name);
-                Assert.Equal(9, (result.Schema[1].Type as VectorType)?.Size);
-                Assert.Equal(18, (result.Schema[2].Type as VectorType)?.Size);
+                Assert.Equal(9, (result.Schema[1].Type as VectorDataViewType)?.Size);
+                Assert.Equal(18, (result.Schema[2].Type as VectorDataViewType)?.Size);
             }
         }
     }

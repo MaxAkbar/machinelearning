@@ -137,7 +137,7 @@ namespace Microsoft.ML.Internal.CpuMath
             Vector256<float> signMask = Vector256.Create(-0.0f); // 0x8000 0000
             Vector256<float> xSign = Avx.And(xDst1, signMask); // result = 0x8000 0000 if xDst1 is negative or 0x0000 0000 otherwise
             Vector256<float> xDst1Abs = Avx.Xor(xDst1, xSign);
-            Vector256<float> xCond = Avx.Compare(xDst1Abs, xThreshold, FloatComparisonMode.GreaterThanOrderedNonSignaling); // result = 0xFFFF FFFF if true
+            Vector256<float> xCond = Avx.Compare(xDst1Abs, xThreshold, FloatComparisonMode.OrderedGreaterThanNonSignaling); // result = 0xFFFF FFFF if true
             Vector256<float> x2 = Avx.Xor(xSign, xThreshold); // -xThreshold if xDst1 is negative and +xThreshold otherwise
             return Avx.And(Avx.Subtract(xDst1, x2), xCond);
         }
@@ -465,22 +465,6 @@ namespace Microsoft.ML.Internal.CpuMath
                 float* pDstCurrent = pd;
                 int length = dst.Length;
                 Vector256<float> scaleVector256 = Vector256.Create(scale);
-
-                if (length < 8)
-                {
-                    // Handle cases where we have less than 256-bits total and can't ever use SIMD acceleration.
-                    switch (length)
-                    {
-                        case 7: dst[6] *= scale; goto case 6;
-                        case 6: dst[5] *= scale; goto case 5;
-                        case 5: dst[4] *= scale; goto case 4;
-                        case 4: dst[3] *= scale; goto case 3;
-                        case 3: dst[2] *= scale; goto case 2;
-                        case 2: dst[1] *= scale; goto case 1;
-                        case 1: dst[0] *= scale; break;
-                    }
-                    return;
-                }
 
                 nuint address = (nuint)(pd);
                 int misalignment = (int)(address % 32);
@@ -993,27 +977,6 @@ namespace Microsoft.ML.Internal.CpuMath
             {
                 float* pValues = pSrc;
                 int length = src.Length;
-
-                if (length < 8)
-                {
-                    // Handle cases where we have less than 256-bits total and can't ever use SIMD acceleration.
-
-                    float res = 0;
-
-                    switch (length)
-                    {
-                        case 7: res += pValues[6]; goto case 6;
-                        case 6: res += pValues[5]; goto case 5;
-                        case 5: res += pValues[4]; goto case 4;
-                        case 4: res += pValues[3]; goto case 3;
-                        case 3: res += pValues[2]; goto case 2;
-                        case 2: res += pValues[1]; goto case 1;
-                        case 1: res += pValues[0]; break;
-                    }
-
-                    return res;
-                }
-
                 Vector256<float> result = Vector256<float>.Zero;
 
                 nuint address = (nuint)(pValues);

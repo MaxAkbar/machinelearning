@@ -8,7 +8,7 @@ For a better understanding of `IDataView` principles and type system please refe
 
 ## Introduction
 
-Every dataset in ML.NET is represented as an `IDataView`, which is, for the purposes of this document, a collection of rows that share the same columns. The set of columns, their names, types and other metadata is known as the *schema* of the `IDataView`, and it's represented as an `ISchema` object.
+Every dataset in ML.NET is represented as an `IDataView`, which is, for the purposes of this document, a collection of rows that share the same columns. The set of columns, their names, types and other annotations is known as the *schema* of the `IDataView`, and it's represented as an `ISchema` object.
 
 In this document, we will be using the terms *data view* and `IDataView` interchangeably, same for *schema* and `ISchema`.
 
@@ -16,9 +16,9 @@ Before any new data enters ML.NET, the user needs to somehow define how the sche
 To do this, the following questions need to be answered:
 - What are the column names?
 - What are their types?
-- What other metadata is associated with the columns?
+- What other annotations are associated with the columns?
 
-These items above are very similar to the definition of fields in a C# class: names and types of columns correspond to names and types of fields, and metadata can correspond to field attributes. 
+These items above are very similar to the definition of fields in a C# class: names and types of columns correspond to names and types of fields, and annotations can correspond to field attributes. 
 Because of this similarity, ML.NET offers a common convenient mechanism for creating a schema: it is done via defining a C# class.
 
 For example, the below class definition can be used to define a data view with 5 float columns:
@@ -59,33 +59,35 @@ public class IrisVectorData
 static void Main(string[] args)
 {
     // Here's a data array that we want to work on.
-    var dataArray = new[] {
-        new IrisData{Label=1, PetalLength=1, SepalLength=1, PetalWidth=1, SepalWidth=1},
-        new IrisData{Label=0, PetalLength=2, SepalLength=2, PetalWidth=2, SepalWidth=2}
+    var dataArray = new[]
+    {
+        new IrisData { Label = 1, PetalLength = 1, SepalLength = 1, PetalWidth = 1, SepalWidth = 1 },
+        new IrisData { Label = 0, PetalLength = 2, SepalLength = 2, PetalWidth = 2, SepalWidth = 2 }
     };
 
     // Create the ML.NET environment.
-    var env = new Microsoft.ML.Data.TlcEnvironment();
+    var context = new MLContext();
 
     // Create the data view.
-    // This method will use the definition of IrisData to understand what columns there are in the 
+    // This method will use the definition of IrisData to understand what columns there are in the
     // data view.
-    var dv = env.CreateDataView<IrisData>(dataArray);
+    var dataView = context.Data.LoadFromEnumerable(dataArray);
 
     // Now let's do something to the data view. For example, concatenate all four non-label columns
     // into 'Features' column.
-    dv = new Microsoft.ML.Data.ConcatTransform(env, dv, "Features", 
+    var pipeline = context.Transforms.Concatenate("Features",
         "SepalLength", "SepalWidth", "PetalLength", "PetalWidth");
 
-    // Read the data into an another array, this time we read the 'Features' and 'Label' columns
-    // of the data, and ignore the rest.
-    // This method will use the definition of IrisVectorData to understand which columns and of which types
+    // Next, let's fit and transform the data so the concatenation goes through the data view.
+    var transformedData = pipeline.Fit(dataView).Transform(dataView);
+
+    // Read the data into an IEnumerable.
+    // This method will use the definition of IrisData to understand which columns and of which types
     // are expected to be present in the input data.
-    var arr = dv.AsEnumerable<IrisVectorData>(env, reuseRowObject: false)
-        .ToArray();
+    var data = context.Data.CreateEnumerable<IrisVectorData>(transformedData, reuseRowObject: false).ToList();
 }
 ```
-After this code runs, `arr` will contain two `IrisVectorData` objects, each having `Features` filled with the actual values of the features (the 4 concatenated columns).
+After this code runs, `data` will contain two `IrisVectorData` objects, each having `Features` filled with the actual values of the features (the 4 concatenated columns).
 
 ### Streaming data views
 
@@ -99,7 +101,7 @@ The only subtle difference is, the resulting `streamingDv` will not support shuf
 
 When you read a data view as `AsEnumerable<OutType>`, ML.NET will create and populate an object per row. If you do not need multiple row objects to exist in memory (for example, you are writing them to disk one by one, as you scan through the `IEnumerable`), you may want to set `reuseRowObject` to `true`. This will make ML.NET create *only one row object for the entire data view* when you enumerate it, and just re-populate the values every time.
 
-Obviously, in the example above this would lead to incorrect behavior, as the `arr` variable will hold two copies of the same `IrisVectorData` object. Please consider carefully whether you want to reuse the row object, because it is more efficient, but can lead to hard to find issues.
+Obviously, in the example above this would lead to incorrect behavior, as the `data` variable will hold two copies of the same `IrisVectorData` object. Please consider carefully whether you want to reuse the row object, because it is more efficient, but can lead to hard to find issues.
 
 Sometimes, we don't even want to *populate* the row object per row. For example, we only want to see every 100th row of the data, so there's no need to populate the remaining 99% row objects. In this case, you can use `AsCursorable<OutType>` method:
 
@@ -143,7 +145,7 @@ If you ever see the error message that says: `An attempt was made to keep iterat
 `IDataView` [type system](IDataViewTypeSystem.md) differs slightly from the C# type system, so a 1-1 mapping between column types and C# types is not always feasible. 
 Below are the most notable examples of the differences:
 
-* `IDataView` vector columns often have a fixed (and known) size. The C# array type best corresponds to a 'variable size' vector: the one that can have different number of slots on every row. You can use `[VectorType(N)]` attribute to an array field to specify that the column is a vector of fixed size N. This is often necessary: most ML components don't work with variable-size vectors, they require fixed-size ones.
+* `IDataView` vector columns often have a fixed (and known) size. The C# array type best corresponds to a 'variable size' vector: the one that can have different number of slots on every row. You can use `[VectorDataViewType(N)]` attribute to an array field to specify that the column is a vector of fixed size N. This is often necessary: most ML components don't work with variable-size vectors, they require fixed-size ones.
 * `IDataView`'s [key types](IDataViewTypeSystem.md#key-types)  don't have a natural underlying C# type either. To declare a key-type column, you need to make your field an `uint`, and decorate it with `[KeyType]` to denote that the field is a key, and not a regular unsigned integer.
 
 ### Full list of type mappings
@@ -168,7 +170,7 @@ The below table illustrates what C# types are mapped to what `IDataView` types:
 | `DT`             | `DvDateTime`       |                         |
 | `DZ`             | `DvDateTimeZone`   |                         |
 | Variable-size vector | `VBuffer<T>`   | `T[]`, and the vector is always dense |
-| Fixed-size vector    | `VBuffer<T>` with `[VectorType(N)]` | `T[]` with `VectorType(N)`, and the vector is always dense |
+| Fixed-size vector    | `VBuffer<T>` with `[VectorDataViewType(N)]` | `T[]` with `VectorDataViewType(N)`, and the vector is always dense |
 | Key type             | `uint` with `[KeyType]`             |                                                            |
 
 ### Additional attributes to affect type mapping
@@ -192,7 +194,7 @@ int numberOfFeatures = 4;
 var schemaDef = SchemaDefinition.Create(typeof(IrisVectorData));
 
 // Specify the right vector size.
-schemaDef["Features"].ColumnType = new VectorType(NumberType.R4, numberOfFeatures);
+schemaDef["Features"].ColumnType = new VectorDataViewType(NumberType.R4, numberOfFeatures);
 
 // Create a data view.
 var dataView = env.CreateDataView<IrisVectorData>(arr, schemaDef);
@@ -201,10 +203,10 @@ var dataView = env.CreateDataView<IrisVectorData>(arr, schemaDef);
 var predictionEngine = env.CreatePredictionEngine<IrisData, IrisVectorData>(dv, outputSchemaDefinition: schemaDef);
 ```
 
-In addition to the above, you can use `SchemaDefinition` to add per-column metadata:
+In addition to the above, you can use `SchemaDefinition` to add per-column annotations:
 ```C#
-// Add column metadata.
-schemaDef["Label"].AddMetadata(MetadataUtils.Kinds.HasMissingValues, false);
+// Add column annotation.
+schemaDef["Label"].AddAnnotation(MetadataUtils.Kinds.HasMissingValues, false);
 ```
 
 ## Limitations
@@ -216,7 +218,7 @@ Here is the list of things that are only possible via the low-level interface:
 * Creating or reading a data view, where even column *types* are not known at compile time (so you cannot create a C# class to define the schema)
   * This can happen if you write a general-purpose machine learning tool that can ingest different kinds of datasets.
 * Reading a subset of columns that differs from one row to another: the cursor always populates the entire row object.
-* Reading column metadata from the data view.
+* Reading column annotations from the data view.
 * Accessing the 'hidden' data view columns by index. 
   * Hidden columns are those that have the same name as other columns and a smaller index. They are not accessible by name.
 * Creating 'cursor sets': this is a feature that lets you iterate over data in multiple parallel threads by splitting the data between multiple 'sibling' cursors.

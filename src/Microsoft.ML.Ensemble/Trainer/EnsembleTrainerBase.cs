@@ -8,22 +8,20 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
-using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Internallearn;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Trainers.Ensemble.SubsetSelector;
-using Microsoft.ML.Training;
 
 namespace Microsoft.ML.Trainers.Ensemble
 {
     using Stopwatch = System.Diagnostics.Stopwatch;
 
-    internal abstract class EnsembleTrainerBase<TOutput, TPredictor, TSelector, TCombiner> : ITrainer<TPredictor>
-         where TPredictor : class, IPredictorProducing<TOutput>
+    internal abstract class EnsembleTrainerBase<TOutput, TSelector, TCombiner> : ITrainer<IPredictor>
          where TSelector : class, ISubModelSelector<TOutput>
          where TCombiner : class, IOutputCombiner<TOutput>
     {
-        public abstract class ArgumentsBase : LearnerInputBaseWithLabel
+        public abstract class ArgumentsBase : TrainerInputBaseWithLabel
         {
 #pragma warning disable CS0649 // These are set via reflection.
             [Argument(ArgumentType.AtMostOnce,
@@ -52,7 +50,7 @@ namespace Microsoft.ML.Trainers.Ensemble
             [TGUI(Label = "Show Sub-Model Metrics")]
             public bool ShowMetrics;
 
-            internal abstract IComponentFactory<ITrainer<IPredictorProducing<TOutput>>>[] GetPredictorFactories();
+            internal abstract IComponentFactory<ITrainerEstimator<ISingleFeaturePredictionTransformer<IPredictorProducing<TOutput>>, IPredictorProducing<TOutput>>>[] GetPredictorFactories();
 #pragma warning restore CS0649
         }
 
@@ -63,7 +61,7 @@ namespace Microsoft.ML.Trainers.Ensemble
         private protected readonly IHost Host;
 
         /// <summary> Ensemble members </summary>
-        private protected readonly ITrainer<IPredictorProducing<TOutput>>[] Trainers;
+        private protected readonly ITrainerEstimator<ISingleFeaturePredictionTransformer<IPredictorProducing<TOutput>>, IPredictorProducing<TOutput>>[] Trainers;
 
         private readonly ISubsetSelector _subsetSelector;
         private protected ISubModelSelector<TOutput> SubModelSelector;
@@ -96,7 +94,7 @@ namespace Microsoft.ML.Trainers.Ensemble
 
                 _subsetSelector = Args.SamplingType.CreateComponent(Host);
 
-                Trainers = new ITrainer<IPredictorProducing<TOutput>>[NumModels];
+                Trainers = new ITrainerEstimator<ISingleFeaturePredictionTransformer<IPredictorProducing<TOutput>>, IPredictorProducing<TOutput>>[NumModels];
                 for (int i = 0; i < Trainers.Length; i++)
                     Trainers[i] = predictorFactories[i % predictorFactories.Length].CreateComponent(Host);
                 // We infer normalization and calibration preferences from the trainers. However, even if the internal trainers
@@ -107,7 +105,7 @@ namespace Microsoft.ML.Trainers.Ensemble
             }
         }
 
-        TPredictor ITrainer<TPredictor>.Train(TrainContext context)
+        IPredictor ITrainer<IPredictor>.Train(TrainContext context)
         {
             Host.CheckValue(context, nameof(context));
 
@@ -118,9 +116,9 @@ namespace Microsoft.ML.Trainers.Ensemble
         }
 
         IPredictor ITrainer.Train(TrainContext context)
-            => ((ITrainer<TPredictor>)this).Train(context);
+            => ((ITrainer<IPredictor>)this).Train(context);
 
-        private TPredictor TrainCore(IChannel ch, RoleMappedData data)
+        private IPredictor TrainCore(IChannel ch, RoleMappedData data)
         {
             Host.AssertValue(ch);
             ch.AssertValue(data);
@@ -156,8 +154,9 @@ namespace Microsoft.ML.Trainers.Ensemble
                         {
                             if (EnsureMinimumFeaturesSelected(subset))
                             {
+                                // REVIEW: How to pass the role mappings to the trainer?
                                 var model = new FeatureSubsetModel<TOutput>(
-                                    Trainers[(int)index].Train(subset.Data),
+                                    Trainers[(int)index].Fit(subset.Data.Data).Model,
                                     subset.SelectedFeatures,
                                     null);
                                 SubModelSelector.CalculateMetrics(model, _subsetSelector, subset, batch, needMetrics);
@@ -191,7 +190,7 @@ namespace Microsoft.ML.Trainers.Ensemble
             return CreatePredictor(models);
         }
 
-        private protected abstract TPredictor CreatePredictor(List<FeatureSubsetModel<TOutput>> models);
+        private protected abstract IPredictor CreatePredictor(List<FeatureSubsetModel<TOutput>> models);
 
         private bool EnsureMinimumFeaturesSelected(Subset subset)
         {

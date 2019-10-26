@@ -4,9 +4,8 @@
 
 using System;
 using System.Reflection;
-using Microsoft.Data.DataView;
 using Microsoft.ML.Data.Conversion;
-using Microsoft.ML.Model;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML.Data
 {
@@ -30,7 +29,7 @@ namespace Microsoft.ML.Data
             env.CheckValue(typeSrc, nameof(typeSrc));
             env.CheckValue(typeDst, nameof(typeDst));
             env.CheckValue(mapper, nameof(mapper));
-            env.Check(keyValueGetter == null || typeDst.GetItemType() is KeyType);
+            env.Check(keyValueGetter == null || typeDst.GetItemType() is KeyDataViewType);
             env.Check(slotNamesGetter == null || typeDst.IsKnownSizeVector());
 
             if (typeSrc.RawType != typeof(TSrc))
@@ -123,17 +122,17 @@ namespace Microsoft.ML.Data
                     {
                         if (keyValueGetter != null)
                         {
-                            MetadataUtils.MetadataGetter<VBuffer<ReadOnlyMemory<char>>> mdGetter =
+                            AnnotationUtils.AnnotationGetter<VBuffer<ReadOnlyMemory<char>>> mdGetter =
                                 (int c, ref VBuffer<ReadOnlyMemory<char>> dst) => keyValueGetter(ref dst);
-                            bldr.AddGetter(MetadataUtils.Kinds.KeyValues, new VectorType(TextDataViewType.Instance, _typeDst.GetItemType().GetKeyCountAsInt32(Host)), mdGetter);
+                            bldr.AddGetter(AnnotationUtils.Kinds.KeyValues, new VectorDataViewType(TextDataViewType.Instance, _typeDst.GetItemType().GetKeyCountAsInt32(Host)), mdGetter);
                         }
                         if (slotNamesGetter != null)
                         {
                             int vectorSize = _typeDst.GetVectorSize();
                             Host.Assert(vectorSize > 0);
-                            MetadataUtils.MetadataGetter<VBuffer<ReadOnlyMemory<char>>> mdGetter =
+                            AnnotationUtils.AnnotationGetter<VBuffer<ReadOnlyMemory<char>>> mdGetter =
                                 (int c, ref VBuffer<ReadOnlyMemory<char>> dst) => slotNamesGetter(ref dst);
-                            bldr.AddGetter(MetadataUtils.Kinds.SlotNames, new VectorType(TextDataViewType.Instance, vectorSize), mdGetter);
+                            bldr.AddGetter(AnnotationUtils.Kinds.SlotNames, new VectorDataViewType(TextDataViewType.Instance, vectorSize), mdGetter);
                         }
                     }
                 }

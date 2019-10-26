@@ -7,9 +7,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Google.Protobuf;
-using Microsoft.Data.DataView;
 using Microsoft.ML.Data;
-using static Microsoft.ML.UniversalModelFormat.Onnx.OnnxCSharpToProtoWrapper;
+using Microsoft.ML.Runtime;
+using static Microsoft.ML.Model.OnnxConverter.OnnxCSharpToProtoWrapper;
 
 namespace Microsoft.ML.Model.OnnxConverter
 {
@@ -67,6 +67,14 @@ namespace Microsoft.ML.Model.OnnxConverter
 
             var attribute = new AttributeProto();
             attribute.Name = key;
+            return attribute;
+        }
+
+        private static AttributeProto MakeAttribute(string key, TensorProto.Types.DataType value)
+        {
+            AttributeProto attribute = MakeAttribute(key);
+            attribute.Type = AttributeProto.Types.AttributeType.Int;
+            attribute.I = (int)value;
             return attribute;
         }
 
@@ -211,6 +219,45 @@ namespace Microsoft.ML.Model.OnnxConverter
 
         public static void NodeAddAttributes(NodeProto node, string argName, bool value)
             => node.Attribute.Add(MakeAttribute(argName, value));
+        public static void NodeAddAttributes(NodeProto node, string argName, Type value)
+            => node.Attribute.Add(MakeAttribute(argName, ConvertToTensorProtoType(value)));
+
+        private static TensorProto.Types.DataType ConvertToTensorProtoType(Type rawType)
+        {
+            var dataType = TensorProto.Types.DataType.Undefined;
+
+            if (rawType == typeof(bool))
+                dataType = TensorProto.Types.DataType.Bool;
+            else if (rawType == typeof(ReadOnlyMemory<char>))
+                dataType = TensorProto.Types.DataType.String;
+            else if (rawType == typeof(sbyte))
+                dataType = TensorProto.Types.DataType.Int8;
+            else if (rawType == typeof(byte))
+                dataType = TensorProto.Types.DataType.Uint8;
+            else if (rawType == typeof(short))
+                dataType = TensorProto.Types.DataType.Int16;
+            else if (rawType == typeof(ushort))
+                dataType = TensorProto.Types.DataType.Uint16;
+            else if (rawType == typeof(int))
+                dataType = TensorProto.Types.DataType.Int32;
+            else if (rawType == typeof(uint))
+                dataType = TensorProto.Types.DataType.Uint32;
+            else if (rawType == typeof(long))
+                dataType = TensorProto.Types.DataType.Int64;
+            else if (rawType == typeof(ulong))
+                dataType = TensorProto.Types.DataType.Uint64;
+            else if (rawType == typeof(float))
+                dataType = TensorProto.Types.DataType.Float;
+            else if (rawType == typeof(double))
+                dataType = TensorProto.Types.DataType.Double;
+            else
+            {
+                string msg = "Unsupported type: " + rawType.ToString();
+                Contracts.Check(false, msg);
+            }
+
+            return dataType;
+        }
 
         private static ByteString StringToByteString(ReadOnlyMemory<char> str) => ByteString.CopyFrom(Encoding.UTF8.GetBytes(str.ToString()));
         private static IEnumerable<ByteString> StringToByteString(IEnumerable<ReadOnlyMemory<char>> str)
@@ -255,10 +302,10 @@ namespace Microsoft.ML.Model.OnnxConverter
             model.Domain = domain;
             model.ProducerName = producerName;
             model.ProducerVersion = producerVersion;
-            model.IrVersion = (long)UniversalModelFormat.Onnx.OnnxCSharpToProtoWrapper.Version.IrVersion;
+            model.IrVersion = (long)OnnxCSharpToProtoWrapper.Version.IrVersion;
             model.ModelVersion = modelVersion;
             model.OpsetImport.Add(new OperatorSetIdProto() { Domain = "ai.onnx.ml", Version = 1 });
-            model.OpsetImport.Add(new OperatorSetIdProto() { Domain = "", Version = 7 });
+            model.OpsetImport.Add(new OperatorSetIdProto() { Domain = "", Version = 9 });
             model.Graph = new GraphProto();
             var graph = model.Graph;
             graph.Node.Add(nodes);
@@ -295,42 +342,12 @@ namespace Microsoft.ML.Model.OnnxConverter
             Contracts.CheckValue(type, nameof(type));
             Contracts.CheckNonEmpty(colName, nameof(colName));
 
-            TensorProto.Types.DataType dataType = TensorProto.Types.DataType.Undefined;
             Type rawType;
-            if (type is VectorType vectorType)
+            if (type is VectorDataViewType vectorType)
                 rawType = vectorType.ItemType.RawType;
             else
                 rawType = type.RawType;
-
-            if (rawType == typeof(bool))
-                dataType = TensorProto.Types.DataType.Float;
-            else if (rawType == typeof(ReadOnlyMemory<char>))
-                dataType = TensorProto.Types.DataType.String;
-            else if (rawType == typeof(sbyte))
-                dataType = TensorProto.Types.DataType.Int8;
-            else if (rawType == typeof(byte))
-                dataType = TensorProto.Types.DataType.Uint8;
-            else if (rawType == typeof(short))
-                dataType = TensorProto.Types.DataType.Int16;
-            else if (rawType == typeof(ushort))
-                dataType = TensorProto.Types.DataType.Uint16;
-            else if (rawType == typeof(int))
-                dataType = TensorProto.Types.DataType.Int32;
-            else if (rawType == typeof(uint))
-                dataType = TensorProto.Types.DataType.Int64;
-            else if (rawType == typeof(long))
-                dataType = TensorProto.Types.DataType.Int64;
-            else if (rawType == typeof(ulong))
-                dataType = TensorProto.Types.DataType.Uint64;
-            else if (rawType == typeof(float))
-                dataType = TensorProto.Types.DataType.Float;
-            else if (rawType == typeof(double))
-                dataType = TensorProto.Types.DataType.Double;
-            else
-            {
-                string msg = "Unsupported type: " + type.ToString();
-                Contracts.Check(false, msg);
-            }
+            var dataType = ConvertToTensorProtoType(rawType);
 
             string name = colName;
             List<long> dimsLocal = null;
@@ -353,7 +370,7 @@ namespace Microsoft.ML.Model.OnnxConverter
                     dimsLocal.Add(1);
                 else if (valueCount > 1)
                 {
-                    var vec = (VectorType)type;
+                    var vec = (VectorDataViewType)type;
                     for (int i = 0; i < vec.Dimensions.Length; i++)
                         dimsLocal.Add(vec.Dimensions[i]);
                 }

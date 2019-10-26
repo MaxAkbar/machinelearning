@@ -5,13 +5,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
 using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Model;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Transforms;
 
 [assembly: LoadableClass(typeof(BinaryClassifierEvaluator), typeof(BinaryClassifierEvaluator), typeof(BinaryClassifierEvaluator.Arguments), typeof(SignatureEvaluator),
@@ -126,27 +125,27 @@ namespace Microsoft.ML.Data
 
         private protected override void CheckScoreAndLabelTypes(RoleMappedSchema schema)
         {
-            var score = schema.GetUniqueColumn(MetadataUtils.Const.ScoreValueKind.Score);
+            var score = schema.GetUniqueColumn(AnnotationUtils.Const.ScoreValueKind.Score);
             var host = Host.SchemaSensitive();
             var t = score.Type;
             if (t != NumberDataViewType.Single)
-                throw host.ExceptSchemaMismatch(nameof(schema), "score", score.Name, "float", t.ToString());
+                throw host.ExceptSchemaMismatch(nameof(schema), "score", score.Name, "Single", t.ToString());
             host.Check(schema.Label.HasValue, "Could not find the label column");
             t = schema.Label.Value.Type;
             if (t != NumberDataViewType.Single && t != NumberDataViewType.Double && t != BooleanDataViewType.Instance && t.GetKeyCount() != 2)
-                throw host.ExceptSchemaMismatch(nameof(schema), "label", schema.Label.Value.Name, "float, double, bool, or a KeyType with cardinality 2", t.ToString());
+                throw host.ExceptSchemaMismatch(nameof(schema), "label", schema.Label.Value.Name, "Single, Double, Boolean, or a Key with cardinality 2", t.ToString());
         }
 
         private protected override void CheckCustomColumnTypesCore(RoleMappedSchema schema)
         {
-            var prob = schema.GetColumns(MetadataUtils.Const.ScoreValueKind.Probability);
+            var prob = schema.GetColumns(AnnotationUtils.Const.ScoreValueKind.Probability);
             var host = Host.SchemaSensitive();
             if (prob != null)
             {
                 host.CheckParam(prob.Count == 1, nameof(schema), "Cannot have multiple probability columns");
                 var probType = prob[0].Type;
                 if (probType != NumberDataViewType.Single)
-                    throw host.ExceptSchemaMismatch(nameof(schema), "probability", prob[0].Name, "float", probType.ToString());
+                    throw host.ExceptSchemaMismatch(nameof(schema), "probability", prob[0].Name, "Single", probType.ToString());
             }
             else if (!_useRaw)
             {
@@ -159,7 +158,7 @@ namespace Microsoft.ML.Data
         private protected override Func<int, bool> GetActiveColsCore(RoleMappedSchema schema)
         {
             var pred = base.GetActiveColsCore(schema);
-            var prob = schema.GetColumns(MetadataUtils.Const.ScoreValueKind.Probability);
+            var prob = schema.GetColumns(AnnotationUtils.Const.ScoreValueKind.Probability);
             Host.Assert(prob == null || prob.Count == 1);
             return i => Utils.Size(prob) > 0 && i == prob[0].Index || pred(i);
         }
@@ -175,8 +174,8 @@ namespace Microsoft.ML.Data
             // Get the label names if they exist, or use the default names.
             var labelNames = default(VBuffer<ReadOnlyMemory<char>>);
             var labelCol = schema.Label.Value;
-            if (labelCol.Type is KeyType &&
-                labelCol.Metadata.Schema.GetColumnOrNull(MetadataUtils.Kinds.KeyValues)?.Type is VectorType vecType &&
+            if (labelCol.Type is KeyDataViewType &&
+                labelCol.Annotations.Schema.GetColumnOrNull(AnnotationUtils.Kinds.KeyValues)?.Type is VectorDataViewType vecType &&
                 vecType.Size > 0 && vecType.ItemType == TextDataViewType.Instance)
             {
                 labelCol.GetKeyValues(ref labelNames);
@@ -193,9 +192,9 @@ namespace Microsoft.ML.Data
         {
             Contracts.CheckValue(schema, nameof(schema));
             Contracts.CheckParam(schema.Label != null, nameof(schema), "Could not find the label column");
-            var scoreInfo = schema.GetUniqueColumn(MetadataUtils.Const.ScoreValueKind.Score);
+            var scoreInfo = schema.GetUniqueColumn(AnnotationUtils.Const.ScoreValueKind.Score);
 
-            var probInfos = schema.GetColumns(MetadataUtils.Const.ScoreValueKind.Probability);
+            var probInfos = schema.GetColumns(AnnotationUtils.Const.ScoreValueKind.Probability);
             var probCol = Utils.Size(probInfos) > 0 ? probInfos[0].Name : null;
             return new BinaryPerInstanceEvaluator(Host, schema.Schema, scoreInfo.Name, probCol, schema.Label.Value.Name, _threshold, _useRaw);
         }
@@ -477,7 +476,7 @@ namespace Microsoft.ML.Data
                         var logLoss = _logLoss / (_numLogLossPositives + _numLogLossNegatives);
                         var priorPos = _numLogLossPositives / (_numLogLossPositives + _numLogLossNegatives);
                         var priorLogLoss = MathUtils.Entropy(priorPos);
-                        return 100 * (priorLogLoss - logLoss) / priorLogLoss;
+                        return (priorLogLoss - logLoss) / priorLogLoss;
                     }
                 }
 
@@ -614,24 +613,24 @@ namespace Microsoft.ML.Data
                 Host.Assert(schema.Label.HasValue);
                 Host.Assert(PassNum < 1);
 
-                var score = schema.GetUniqueColumn(MetadataUtils.Const.ScoreValueKind.Score);
+                var score = schema.GetUniqueColumn(AnnotationUtils.Const.ScoreValueKind.Score);
 
                 _labelGetter = RowCursorUtils.GetLabelGetter(row, schema.Label.Value.Index);
-                _scoreGetter = row.GetGetter<Single>(score.Index);
+                _scoreGetter = row.GetGetter<Single>(score);
                 Host.AssertValue(_labelGetter);
                 Host.AssertValue(_scoreGetter);
 
-                var prob = schema.GetColumns(new RoleMappedSchema.ColumnRole(MetadataUtils.Const.ScoreValueKind.Probability));
+                var prob = schema.GetColumns(new RoleMappedSchema.ColumnRole(AnnotationUtils.Const.ScoreValueKind.Probability));
                 Host.Assert(prob == null || prob.Count == 1);
 
                 if (prob != null)
-                    _probGetter = row.GetGetter<Single>(prob[0].Index);
+                    _probGetter = row.GetGetter<Single>(prob[0]);
                 else
                     _probGetter = (ref Single value) => value = Single.NaN;
 
                 Host.Assert((schema.Weight != null) == Weighted);
                 if (Weighted)
-                    _weightGetter = row.GetGetter<Single>(schema.Weight.Value.Index);
+                    _weightGetter = row.GetGetter<Single>(schema.Weight.Value);
             }
 
             public override void ProcessRow()
@@ -809,24 +808,114 @@ namespace Microsoft.ML.Data
 
             var roles = new RoleMappedData(data, opt: false,
                 RoleMappedSchema.ColumnRole.Label.Bind(label),
-                RoleMappedSchema.CreatePair(MetadataUtils.Const.ScoreValueKind.Score, score),
-                RoleMappedSchema.CreatePair(MetadataUtils.Const.ScoreValueKind.Probability, probability),
-                RoleMappedSchema.CreatePair(MetadataUtils.Const.ScoreValueKind.PredictedLabel, predictedLabel));
+                RoleMappedSchema.CreatePair(AnnotationUtils.Const.ScoreValueKind.Score, score),
+                RoleMappedSchema.CreatePair(AnnotationUtils.Const.ScoreValueKind.Probability, probability),
+                RoleMappedSchema.CreatePair(AnnotationUtils.Const.ScoreValueKind.PredictedLabel, predictedLabel));
 
             var resultDict = ((IEvaluator)this).Evaluate(roles);
             Host.Assert(resultDict.ContainsKey(MetricKinds.OverallMetrics));
             var overall = resultDict[MetricKinds.OverallMetrics];
+            var confusionMatrix = resultDict[MetricKinds.ConfusionMatrix];
 
             CalibratedBinaryClassificationMetrics result;
             using (var cursor = overall.GetRowCursorForAllColumns())
             {
                 var moved = cursor.MoveNext();
                 Host.Assert(moved);
-                result = new CalibratedBinaryClassificationMetrics(Host, cursor);
+                result = new CalibratedBinaryClassificationMetrics(Host, cursor, confusionMatrix);
                 moved = cursor.MoveNext();
                 Host.Assert(!moved);
             }
+
             return result;
+        }
+
+        /// <summary>
+        /// Evaluates scored binary classification data and generates precision recall curve data.
+        /// </summary>
+        /// <param name="data">The scored data.</param>
+        /// <param name="label">The name of the label column in <paramref name="data"/>.</param>
+        /// <param name="score">The name of the score column in <paramref name="data"/>.</param>
+        /// <param name="probability">The name of the probability column in <paramref name="data"/>, the calibrated version of <paramref name="score"/>.</param>
+        /// <param name="predictedLabel">The name of the predicted label column in <paramref name="data"/>.</param>
+        /// <param name="prCurve">The generated precision recall curve data. Up to 100000 of samples are used for p/r curve generation.</param>
+        /// <returns>The evaluation results for these calibrated outputs.</returns>
+        public CalibratedBinaryClassificationMetrics EvaluateWithPRCurve(
+            IDataView data,
+            string label,
+            string score,
+            string probability,
+            string predictedLabel,
+            out List<BinaryPrecisionRecallDataPoint> prCurve)
+        {
+            Host.CheckValue(data, nameof(data));
+            Host.CheckNonEmpty(label, nameof(label));
+            Host.CheckNonEmpty(score, nameof(score));
+            Host.CheckNonEmpty(probability, nameof(probability));
+            Host.CheckNonEmpty(predictedLabel, nameof(predictedLabel));
+
+            var roles = new RoleMappedData(data, opt: false,
+                RoleMappedSchema.ColumnRole.Label.Bind(label),
+                RoleMappedSchema.CreatePair(AnnotationUtils.Const.ScoreValueKind.Score, score),
+                RoleMappedSchema.CreatePair(AnnotationUtils.Const.ScoreValueKind.Probability, probability),
+                RoleMappedSchema.CreatePair(AnnotationUtils.Const.ScoreValueKind.PredictedLabel, predictedLabel));
+
+            var resultDict = ((IEvaluator)this).Evaluate(roles);
+            Host.Assert(resultDict.ContainsKey(MetricKinds.PrCurve));
+            var prCurveView = resultDict[MetricKinds.PrCurve];
+            Host.Assert(resultDict.ContainsKey(MetricKinds.OverallMetrics));
+            var overall = resultDict[MetricKinds.OverallMetrics];
+
+            var prCurveResult = new List<BinaryPrecisionRecallDataPoint>();
+            using (var cursor = prCurveView.GetRowCursorForAllColumns())
+            {
+                GetPrecisionRecallDataPointGetters(prCurveView, cursor,
+                    out ValueGetter<float> thresholdGetter,
+                    out ValueGetter<double> precisionGetter,
+                    out ValueGetter<double> recallGetter,
+                    out ValueGetter<double> fprGetter);
+
+                while (cursor.MoveNext())
+                {
+                    prCurveResult.Add(new BinaryPrecisionRecallDataPoint(thresholdGetter, precisionGetter, recallGetter, fprGetter));
+                }
+            }
+            prCurve = prCurveResult;
+            var confusionMatrix = resultDict[MetricKinds.ConfusionMatrix];
+
+            CalibratedBinaryClassificationMetrics result;
+            using (var cursor = overall.GetRowCursorForAllColumns())
+            {
+                var moved = cursor.MoveNext();
+                Host.Assert(moved);
+                result = new CalibratedBinaryClassificationMetrics(Host, cursor, confusionMatrix);
+                moved = cursor.MoveNext();
+                Host.Assert(!moved);
+            }
+
+            return result;
+        }
+
+        private void GetPrecisionRecallDataPointGetters(IDataView prCurveView,
+            DataViewRowCursor cursor,
+            out ValueGetter<float> thresholdGetter,
+            out ValueGetter<double> precisionGetter,
+            out ValueGetter<double> recallGetter,
+            out ValueGetter<double> fprGetter)
+        {
+            var thresholdColumn = prCurveView.Schema.GetColumnOrNull(BinaryClassifierEvaluator.Threshold);
+            var precisionColumn = prCurveView.Schema.GetColumnOrNull(BinaryClassifierEvaluator.Precision);
+            var recallColumn = prCurveView.Schema.GetColumnOrNull(BinaryClassifierEvaluator.Recall);
+            var fprColumn = prCurveView.Schema.GetColumnOrNull(BinaryClassifierEvaluator.FalsePositiveRate);
+            Host.Assert(thresholdColumn != null);
+            Host.Assert(precisionColumn != null);
+            Host.Assert(recallColumn != null);
+            Host.Assert(fprColumn != null);
+
+            thresholdGetter = cursor.GetGetter<float>((DataViewSchema.Column)thresholdColumn);
+            precisionGetter = cursor.GetGetter<double>((DataViewSchema.Column)precisionColumn);
+            recallGetter = cursor.GetGetter<double>((DataViewSchema.Column)recallColumn);
+            fprGetter = cursor.GetGetter<double>((DataViewSchema.Column)fprColumn);
         }
 
         /// <summary>
@@ -847,22 +936,88 @@ namespace Microsoft.ML.Data
 
             var roles = new RoleMappedData(data, opt: false,
                 RoleMappedSchema.ColumnRole.Label.Bind(label),
-                RoleMappedSchema.CreatePair(MetadataUtils.Const.ScoreValueKind.Score, score),
-                RoleMappedSchema.CreatePair(MetadataUtils.Const.ScoreValueKind.PredictedLabel, predictedLabel));
+                RoleMappedSchema.CreatePair(AnnotationUtils.Const.ScoreValueKind.Score, score),
+                RoleMappedSchema.CreatePair(AnnotationUtils.Const.ScoreValueKind.PredictedLabel, predictedLabel));
 
             var resultDict = ((IEvaluator)this).Evaluate(roles);
             Host.Assert(resultDict.ContainsKey(MetricKinds.OverallMetrics));
             var overall = resultDict[MetricKinds.OverallMetrics];
+            var confusionMatrix = resultDict[MetricKinds.ConfusionMatrix];
 
             BinaryClassificationMetrics result;
             using (var cursor = overall.GetRowCursorForAllColumns())
             {
                 var moved = cursor.MoveNext();
                 Host.Assert(moved);
-                result = new BinaryClassificationMetrics(Host, cursor);
+                result = new BinaryClassificationMetrics(Host, cursor, confusionMatrix);
                 moved = cursor.MoveNext();
                 Host.Assert(!moved);
             }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Evaluates scored binary classification data, without probability-based metrics
+        /// and generates precision recall curve data.
+        /// </summary>
+        /// <param name="data">The scored data.</param>
+        /// <param name="label">The name of the label column in <paramref name="data"/>.</param>
+        /// <param name="score">The name of the score column in <paramref name="data"/>.</param>
+        /// <param name="predictedLabel">The name of the predicted label column in <paramref name="data"/>.</param>
+        /// <param name="prCurve">The generated precision recall curve data. Up to 100000 of samples are used for p/r curve generation.</param>
+        /// <returns>The evaluation results for these uncalibrated outputs.</returns>
+        /// <seealso cref="Evaluate(IDataView, string, string, string)"/>
+        public BinaryClassificationMetrics EvaluateWithPRCurve(
+            IDataView data,
+            string label,
+            string score,
+            string predictedLabel,
+            out List<BinaryPrecisionRecallDataPoint> prCurve)
+        {
+            Host.CheckValue(data, nameof(data));
+            Host.CheckNonEmpty(label, nameof(label));
+            Host.CheckNonEmpty(score, nameof(score));
+            Host.CheckNonEmpty(predictedLabel, nameof(predictedLabel));
+
+            var roles = new RoleMappedData(data, opt: false,
+                RoleMappedSchema.ColumnRole.Label.Bind(label),
+                RoleMappedSchema.CreatePair(AnnotationUtils.Const.ScoreValueKind.Score, score),
+                RoleMappedSchema.CreatePair(AnnotationUtils.Const.ScoreValueKind.PredictedLabel, predictedLabel));
+
+            var resultDict = ((IEvaluator)this).Evaluate(roles);
+            Host.Assert(resultDict.ContainsKey(MetricKinds.PrCurve));
+            var prCurveView = resultDict[MetricKinds.PrCurve];
+            Host.Assert(resultDict.ContainsKey(MetricKinds.OverallMetrics));
+            var overall = resultDict[MetricKinds.OverallMetrics];
+            var confusionMatrix = resultDict[MetricKinds.ConfusionMatrix];
+
+            var prCurveResult = new List<BinaryPrecisionRecallDataPoint>();
+            using (var cursor = prCurveView.GetRowCursorForAllColumns())
+            {
+                GetPrecisionRecallDataPointGetters(prCurveView, cursor,
+                    out ValueGetter<float> thresholdGetter,
+                    out ValueGetter<double> precisionGetter,
+                    out ValueGetter<double> recallGetter,
+                    out ValueGetter<double> fprGetter);
+
+                while (cursor.MoveNext())
+                {
+                    prCurveResult.Add(new BinaryPrecisionRecallDataPoint(thresholdGetter, precisionGetter, recallGetter, fprGetter));
+                }
+            }
+            prCurve = prCurveResult;
+
+            BinaryClassificationMetrics result;
+            using (var cursor = overall.GetRowCursorForAllColumns())
+            {
+                var moved = cursor.MoveNext();
+                Host.Assert(moved);
+                result = new BinaryClassificationMetrics(Host, cursor, confusionMatrix);
+                moved = cursor.MoveNext();
+                Host.Assert(!moved);
+            }
+
             return result;
         }
     }
@@ -999,12 +1154,12 @@ namespace Microsoft.ML.Data
                 RowCursorUtils.GetLabelGetter(input, LabelIndex) : nanGetter;
             ValueGetter<Single> probGetter;
             if (_probIndex >= 0 && activeCols(LogLossCol))
-                probGetter = input.GetGetter<Single>(_probIndex);
+                probGetter = input.GetGetter<Single>(input.Schema[_probIndex]);
             else
                 probGetter = nanGetter;
             ValueGetter<Single> scoreGetter;
             if (activeCols(AssignedCol) && ScoreIndex >= 0)
-                scoreGetter = input.GetGetter<Single>(ScoreIndex);
+                scoreGetter = input.GetGetter<Single>(input.Schema[ScoreIndex]);
             else
                 scoreGetter = nanGetter;
 
@@ -1099,18 +1254,18 @@ namespace Microsoft.ML.Data
 
             var t = schema[(int)LabelIndex].Type;
             if (t != NumberDataViewType.Single && t != NumberDataViewType.Double && t != BooleanDataViewType.Instance && t.GetKeyCount() != 2)
-                throw Host.ExceptSchemaMismatch(nameof(schema), "label", LabelCol, "float, double, bool or a KeyType with cardinality 2", t.ToString());
+                throw Host.ExceptSchemaMismatch(nameof(schema), "label", LabelCol, "Single, Double, Boolean or a Key with cardinality 2", t.ToString());
 
             t = schema[ScoreIndex].Type;
             if (t != NumberDataViewType.Single)
-                throw Host.ExceptSchemaMismatch(nameof(schema), "score", ScoreCol, "float", t.ToString());
+                throw Host.ExceptSchemaMismatch(nameof(schema), "score", ScoreCol, "Single", t.ToString());
 
             if (_probIndex >= 0)
             {
                 Host.Assert(!string.IsNullOrEmpty(_probCol));
                 t = schema[_probIndex].Type;
                 if (t != NumberDataViewType.Single)
-                    throw Host.ExceptSchemaMismatch(nameof(schema), "probability", _probCol, "float", t.ToString());
+                    throw Host.ExceptSchemaMismatch(nameof(schema), "probability", _probCol, "Single", t.ToString());
             }
             else if (!_useRaw)
                 throw Host.Except("Cannot compute the predicted label from the probability column because it does not exist");
@@ -1156,7 +1311,7 @@ namespace Microsoft.ML.Data
         private protected override IEvaluator Evaluator => _evaluator;
 
         public BinaryClassifierMamlEvaluator(IHostEnvironment env, Arguments args)
-            : base(args, env, MetadataUtils.Const.ScoreColumnKind.BinaryClassification, "BinaryClassifierMamlEvaluator")
+            : base(args, env, AnnotationUtils.Const.ScoreColumnKind.BinaryClassification, "BinaryClassifierMamlEvaluator")
         {
             Host.CheckValue(args, nameof(args));
             Utils.CheckOptionalUserDirectory(args.PRFilename, nameof(args.PRFilename));
@@ -1178,13 +1333,13 @@ namespace Microsoft.ML.Data
             var cols = base.GetInputColumnRolesCore(schema);
 
             var scoreCol = EvaluateUtils.GetScoreColumn(Host, schema.Schema, ScoreCol, nameof(Arguments.ScoreColumn),
-                MetadataUtils.Const.ScoreColumnKind.BinaryClassification);
+                AnnotationUtils.Const.ScoreColumnKind.BinaryClassification);
 
             // Get the optional probability column.
             var probCol = EvaluateUtils.GetOptAuxScoreColumn(Host, schema.Schema, _probCol, nameof(Arguments.ProbabilityColumn),
-                scoreCol.Index, MetadataUtils.Const.ScoreValueKind.Probability, NumberDataViewType.Single.Equals);
+                scoreCol.Index, AnnotationUtils.Const.ScoreValueKind.Probability, NumberDataViewType.Single.Equals);
             if (probCol.HasValue)
-                cols = MetadataUtils.Prepend(cols, RoleMappedSchema.CreatePair(MetadataUtils.Const.ScoreValueKind.Probability, probCol.Value.Name));
+                cols = AnnotationUtils.Prepend(cols, RoleMappedSchema.CreatePair(AnnotationUtils.Const.ScoreValueKind.Probability, probCol.Value.Name));
             return cols;
         }
 
@@ -1228,7 +1383,7 @@ namespace Microsoft.ML.Data
             fold = ColumnSelectingTransformer.CreateKeep(Host, fold, colsToKeep.ToArray());
 
             string weightedConf;
-            var unweightedConf = MetricWriter.GetConfusionTable(Host, conf, out weightedConf);
+            var unweightedConf = MetricWriter.GetConfusionTableAsFormattedString(Host, conf, out weightedConf);
             string weightedFold;
             var unweightedFold = MetricWriter.GetPerFoldResults(Host, fold, out weightedFold);
             ch.Assert(string.IsNullOrEmpty(weightedConf) == string.IsNullOrEmpty(weightedFold));
@@ -1488,10 +1643,10 @@ namespace Microsoft.ML.Data
             // The binary classifier evaluator outputs the label, score and probability columns.
             yield return schema.Label.Value.Name;
             var scoreCol = EvaluateUtils.GetScoreColumn(Host, schema.Schema, ScoreCol, nameof(Arguments.ScoreColumn),
-                MetadataUtils.Const.ScoreColumnKind.BinaryClassification);
+                AnnotationUtils.Const.ScoreColumnKind.BinaryClassification);
             yield return scoreCol.Name;
             var probCol = EvaluateUtils.GetOptAuxScoreColumn(Host, schema.Schema, _probCol, nameof(Arguments.ProbabilityColumn),
-                scoreCol.Index, MetadataUtils.Const.ScoreValueKind.Probability, NumberDataViewType.Single.Equals);
+                scoreCol.Index, AnnotationUtils.Const.ScoreValueKind.Probability, NumberDataViewType.Single.Equals);
             // Return the output columns. The LogLoss column is returned only if the probability column exists.
             if (probCol.HasValue)
             {

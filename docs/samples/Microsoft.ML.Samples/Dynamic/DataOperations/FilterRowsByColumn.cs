@@ -1,29 +1,31 @@
 ﻿using System;
 using System.Collections.Generic;
-using Microsoft.ML.Data;
+using Microsoft.ML;
 
-namespace Microsoft.ML.Samples.Dynamic
+namespace Samples.Dynamic
 {
-    /// <summary>
-    /// Sample class showing how to use FilterRowsByColumn.
-    /// </summary>
     public static class FilterRowsByColumn
     {
+        // // Sample class showing how to filter out some rows in
+        // IDataView.
         public static void Example()
         {
-            // Create a new context for ML.NET operations. It can be used for exception tracking and logging, 
-            // as a catalog of available operations and as the source of randomness.
+            // Create a new context for ML.NET operations. It can be used for
+            // exception tracking and logging, as a catalog of available
+	    // operations and as the source of randomness.
             var mlContext = new MLContext();
 
             // Get a small dataset as an IEnumerable.
-            IEnumerable<SamplesUtils.DatasetUtils.SampleTemperatureData> enumerableOfData = SamplesUtils.DatasetUtils.GetSampleTemperatureData(10);
-            var data = mlContext.Data.ReadFromEnumerable(enumerableOfData);
+            var enumerableOfData = GetSampleTemperatureData(10);
+            var data = mlContext.Data.LoadFromEnumerable(enumerableOfData);
 
             // Before we apply a filter, examine all the records in the dataset.
             Console.WriteLine($"Date\tTemperature");
             foreach (var row in enumerableOfData)
             {
-                Console.WriteLine($"{row.Date.ToString("d")}\t{row.Temperature}");
+                Console.WriteLine(
+		    $"{row.Date.ToString("d")}\t{row.Temperature}");
+
             }
             Console.WriteLine();
             // Expected output:
@@ -39,15 +41,24 @@ namespace Microsoft.ML.Samples.Dynamic
             //  1/10/2012       30
             //  1/11/2012       29
 
-            // Filter the data by the values of the temperature. The lower bound is inclusive, the upper exclusive.
-            var filteredData = mlContext.Data.FilterRowsByColumn(data, columnName: "Temperature", lowerBound: 34, upperBound: 37);
+            // Filter the data by the values of the temperature. The lower bound is
+	    // inclusive, the upper exclusive.
+            var filteredData = mlContext.Data
+			    .FilterRowsByColumn(data, columnName: "Temperature",
+			    lowerBound: 34, upperBound: 37);
 
-            // Look at the filtered data and observe that values outside [34,37) have been dropped.
-            var enumerable = mlContext.CreateEnumerable<SamplesUtils.DatasetUtils.SampleTemperatureData>(filteredData, reuseRowObject: true);
+            // Look at the filtered data and observe that values outside [34,37)
+	    // have been dropped.
+            var enumerable = mlContext.Data
+			    .CreateEnumerable<SampleTemperatureData>(filteredData,
+			    reuseRowObject: true);
+
             Console.WriteLine($"Date\tTemperature");
             foreach (var row in enumerable)
             {
-                Console.WriteLine($"{row.Date.ToString("d")}\t{row.Temperature}");
+                Console.WriteLine(
+		    $"{row.Date.ToString("d")}\t{row.Temperature}");
+
             }
 
             // Expected output:
@@ -59,5 +70,35 @@ namespace Microsoft.ML.Samples.Dynamic
             //  1/6/2012        35
             //  1/9/2012        35
         }
+
+        private class SampleTemperatureData
+        {
+            public DateTime Date { get; set; }
+            public float Temperature { get; set; }
+        }
+		
+        /// <summary>
+        /// Get a fake temperature dataset.
+        /// </summary>
+        /// <param name="exampleCount">The number of examples to return.</param>
+        /// <returns>An enumerable of <see cref="SampleTemperatureData"/>.</returns>
+        private static IEnumerable<SampleTemperatureData> GetSampleTemperatureData(
+		    int exampleCount)
+
+        {
+            var rng = new Random(1234321);
+            var date = new DateTime(2012, 1, 1);
+            float temperature = 39.0f;
+
+            for (int i = 0; i < exampleCount; i++)
+            {
+                date = date.AddDays(1);
+                temperature += rng.Next(-5, 5);
+                yield return new SampleTemperatureData { Date = date, Temperature = 
+				    temperature };
+
+            }
+        }
     }
 }
+

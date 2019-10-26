@@ -4,7 +4,8 @@
 
 using System;
 using System.Collections.Generic;
-using static Microsoft.ML.UniversalModelFormat.Onnx.OnnxCSharpToProtoWrapper;
+using Microsoft.ML.Runtime;
+using static Microsoft.ML.Model.OnnxConverter.OnnxCSharpToProtoWrapper;
 
 namespace Microsoft.ML.Model.OnnxConverter
 {
@@ -41,6 +42,8 @@ namespace Microsoft.ML.Model.OnnxConverter
         public override void AddAttribute(string argName, string value)
             => OnnxUtils.NodeAddAttributes(_node, argName, value);
         public override void AddAttribute(string argName, bool value)
+            => OnnxUtils.NodeAddAttributes(_node, argName, value);
+        public override void AddAttribute(string argName, Type value)
             => OnnxUtils.NodeAddAttributes(_node, argName, value);
     }
 }

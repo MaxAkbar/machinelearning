@@ -9,14 +9,13 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
 using Microsoft.ML.Data.IO;
 using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Model;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Transforms.Text;
 
 [assembly: LoadableClass(StopWordsRemovingTransformer.Summary, typeof(IDataTransform), typeof(StopWordsRemovingTransformer), typeof(StopWordsRemovingTransformer.Options), typeof(SignatureDataTransform),
@@ -49,23 +48,20 @@ using Microsoft.ML.Transforms.Text;
 namespace Microsoft.ML.Transforms.Text
 {
     [TlcModule.ComponentKind("StopWordsRemover")]
-    internal interface IStopWordsRemoverFactory : IComponentFactory<IDataView, OneToOneColumn[], IDataTransform> { }
+    internal interface IStopWordsRemoverFactory : IComponentFactory<IDataView, OneToOneColumn[], ITransformer> { }
 
     [TlcModule.Component(Name = "Predefined", FriendlyName = "Predefined Stopwords List Remover", Alias = "PredefinedStopWordsRemover,PredefinedStopWords",
         Desc = "Remover with predefined list of stop words.")]
     internal sealed class PredefinedStopWordsRemoverFactory : IStopWordsRemoverFactory
     {
-        public IDataTransform CreateComponent(IHostEnvironment env, IDataView input, OneToOneColumn[] columns)
+        public ITransformer CreateComponent(IHostEnvironment env, IDataView input, OneToOneColumn[] columns)
         {
-            return new StopWordsRemovingEstimator(env, columns.Select(x => new StopWordsRemovingEstimator.ColumnInfo(x.Name, x.Source)).ToArray()).Fit(input).Transform(input) as IDataTransform;
+            return new StopWordsRemovingTransformer(env, columns.Select(x => new StopWordsRemovingEstimator.ColumnOptions(x.Name, x.Source)).ToArray());
         }
     }
 
     /// <summary>
-    /// A Stopword remover transform based on language-specific lists of stop words (most common words)
-    /// from Office Named Entity Recognition project.
-    /// The transform is usually applied after tokenizing text, so it compares individual tokens
-    /// (case-insensitive comparison) to the stopwords.
+    /// <see cref="ITransformer"/> resulting from fitting a <see cref="StopWordsRemovingEstimator"/>.
     /// </summary>
     public sealed class StopWordsRemovingTransformer : OneToOneTransformerBase
     {
@@ -133,9 +129,9 @@ namespace Microsoft.ML.Transforms.Text
         /// <summary>
         /// Defines the behavior of the transformer.
         /// </summary>
-        public IReadOnlyCollection<StopWordsRemovingEstimator.ColumnInfo> Columns => _columns.AsReadOnly();
+        internal IReadOnlyCollection<StopWordsRemovingEstimator.ColumnOptions> Columns => _columns.AsReadOnly();
 
-        private readonly StopWordsRemovingEstimator.ColumnInfo[] _columns;
+        private readonly StopWordsRemovingEstimator.ColumnOptions[] _columns;
         private static volatile NormStr.Pool[] _stopWords;
         private static volatile Dictionary<ReadOnlyMemory<char>, StopWordsRemovingEstimator.Language> _langsDictionary;
 
@@ -181,7 +177,7 @@ namespace Microsoft.ML.Transforms.Text
             }
         }
 
-        private static (string outputColumnName, string inputColumnName)[] GetColumnPairs(StopWordsRemovingEstimator.ColumnInfo[] columns)
+        private static (string outputColumnName, string inputColumnName)[] GetColumnPairs(StopWordsRemovingEstimator.ColumnOptions[] columns)
         {
             Contracts.CheckValue(columns, nameof(columns));
             return columns.Select(x => (x.Name, x.InputColumnName)).ToArray();
@@ -199,7 +195,7 @@ namespace Microsoft.ML.Transforms.Text
         /// </summary>
         /// <param name="env">The environment.</param>
         /// <param name="columns">Pairs of columns to remove stop words from.</param>
-        internal StopWordsRemovingTransformer(IHostEnvironment env, params StopWordsRemovingEstimator.ColumnInfo[] columns) :
+        internal StopWordsRemovingTransformer(IHostEnvironment env, params StopWordsRemovingEstimator.ColumnOptions[] columns) :
             base(Contracts.CheckRef(env, nameof(env)).Register(RegistrationName), GetColumnPairs(columns))
         {
             _columns = columns;
@@ -233,13 +229,13 @@ namespace Microsoft.ML.Transforms.Text
             // foreach column:
             //   int: the stopwords list language
             //   string: the id of languages column name
-            _columns = new StopWordsRemovingEstimator.ColumnInfo[columnsLength];
+            _columns = new StopWordsRemovingEstimator.ColumnOptions[columnsLength];
             for (int i = 0; i < columnsLength; i++)
             {
                 var lang = (StopWordsRemovingEstimator.Language)ctx.Reader.ReadInt32();
                 Contracts.CheckDecode(Enum.IsDefined(typeof(StopWordsRemovingEstimator.Language), lang));
                 var langColName = ctx.LoadStringOrNull();
-                _columns[i] = new StopWordsRemovingEstimator.ColumnInfo(ColumnPairs[i].outputColumnName, ColumnPairs[i].inputColumnName, lang, langColName);
+                _columns[i] = new StopWordsRemovingEstimator.ColumnOptions(ColumnPairs[i].outputColumnName, ColumnPairs[i].inputColumnName, lang, langColName);
             }
         }
 
@@ -261,11 +257,11 @@ namespace Microsoft.ML.Transforms.Text
             env.CheckValue(input, nameof(input));
 
             env.CheckValue(options.Columns, nameof(options.Columns));
-            var cols = new StopWordsRemovingEstimator.ColumnInfo[options.Columns.Length];
+            var cols = new StopWordsRemovingEstimator.ColumnOptions[options.Columns.Length];
             for (int i = 0; i < cols.Length; i++)
             {
                 var item = options.Columns[i];
-                cols[i] = new StopWordsRemovingEstimator.ColumnInfo(
+                cols[i] = new StopWordsRemovingEstimator.ColumnOptions(
                    item.Name,
                    item.Source ?? item.Name,
                    item.Language ?? options.Language,
@@ -375,7 +371,7 @@ namespace Microsoft.ML.Transforms.Text
                     if (!StopWordsRemovingEstimator.IsColumnTypeValid(srcType))
                         throw Host.ExceptSchemaMismatch(nameof(inputSchema), "input", parent._columns[i].InputColumnName, StopWordsRemovingEstimator.ExpectedColumnType, srcType.ToString());
 
-                    _types[i] = new VectorType(TextDataViewType.Instance);
+                    _types[i] = new VectorDataViewType(TextDataViewType.Instance);
                     if (!string.IsNullOrEmpty(_parent._columns[i].LanguageColumn))
                     {
                         if (!inputSchema.TryGetColumnIndex(_parent._columns[i].LanguageColumn, out int langCol))
@@ -408,8 +404,8 @@ namespace Microsoft.ML.Transforms.Text
 
                 StopWordsRemovingEstimator.Language stopWordslang = _parent._columns[iinfo].Language;
                 var lang = default(ReadOnlyMemory<char>);
-                var getLang = _languageColumns[iinfo] >= 0 ? input.GetGetter<ReadOnlyMemory<char>>(_languageColumns[iinfo]) : null;
-                var getSrc = input.GetGetter<VBuffer<ReadOnlyMemory<char>>>(_colMapNewToOld[iinfo]);
+                var getLang = _languageColumns[iinfo] >= 0 ? input.GetGetter<ReadOnlyMemory<char>>(input.Schema[_languageColumns[iinfo]]) : null;
+                var getSrc = input.GetGetter<VBuffer<ReadOnlyMemory<char>>>(input.Schema[_colMapNewToOld[iinfo]]);
                 var src = default(VBuffer<ReadOnlyMemory<char>>);
                 var buffer = new StringBuilder();
                 var list = new List<ReadOnlyMemory<char>>();
@@ -484,16 +480,49 @@ namespace Microsoft.ML.Transforms.Text
     }
 
     /// <summary>
-    /// Stopword remover removes language-specific list of stop words (most common words)
-    /// This is usually applied after tokenizing text, so it compares individual tokens
-    /// (case-insensitive comparison) to the stopwords.
+    /// <see cref="IEstimator{TTransformer}"/> for the <see cref="CustomStopWordsRemovingTransformer"/>.
     /// </summary>
+    /// <remarks>
+    /// <format type="text/markdown"><![CDATA[
+    /// ###  Estimator Characteristics
+    /// |  |  |
+    /// | -- | -- |
+    /// | Does this estimator need to look at the data to train its parameters? | No |
+    /// | Input column data type | Vector of [Text](xref:Microsoft.ML.Data.TextDataViewType) |
+    /// | Output column data type | Variable-sized vector of [Text](xref:Microsoft.ML.Data.TextDataViewType) |
+    ///
+    /// The resulting <xref:Microsoft.ML.Transforms.Text.StopWordsRemovingTransformer> creates a new column, named as specified in the output column name parameter,
+    /// and fills it with a vector of words containing all of the words in the input column **except the predefined list of stopwords for the specified language.
+    /// All text comparison made by casting predefined text and text from input column to lower case using casing rules of invariant culture.
+    ///
+    /// Check the See Also section for links to usage examples.
+    /// ]]>
+    /// </format>
+    /// </remarks>
+    /// <seealso cref="TextCatalog.RemoveDefaultStopWords(TransformsCatalog.TextTransforms, string, string, Language)" />
     public sealed class StopWordsRemovingEstimator : TrivialEstimator<StopWordsRemovingTransformer>
     {
         /// <summary>
+        /// Use stop words remover that can remove language-specific list of stop words (most common words) already defined in the system.
+        /// </summary>
+        public sealed class Options : IStopWordsRemoverOptions
+        {
+            /// <summary>
+            /// Language of the text dataset. 'English' is default.
+            /// </summary>
+            public TextFeaturizingEstimator.Language Language;
+
+            public Options()
+            {
+                Language = TextFeaturizingEstimator.DefaultLanguage;
+            }
+        }
+
+        /// <summary>
         /// Describes how the transformer handles one column pair.
         /// </summary>
-        public sealed class ColumnInfo
+        [BestFriend]
+        internal sealed class ColumnOptions
         {
             /// <summary>Name of the column resulting from the transformation of <see cref="InputColumnName"/>.</summary>
             public readonly string Name;
@@ -511,7 +540,7 @@ namespace Microsoft.ML.Transforms.Text
             /// <param name="inputColumnName">Name of the column to transform. If set to <see langword="null"/>, the value of the <paramref name="name"/> will be used as source.</param>
             /// <param name="language">Language-specific stop words list.</param>
             /// <param name="languageColumn">Optional column to use for languages. This overrides language value.</param>
-            public ColumnInfo(string name,
+            public ColumnOptions(string name,
                 string inputColumnName = null,
                 Language language = Defaults.DefaultLanguage,
                 string languageColumn = null)
@@ -556,9 +585,9 @@ namespace Microsoft.ML.Transforms.Text
         }
 
         internal static bool IsColumnTypeValid(DataViewType type) =>
-            type is VectorType vectorType && vectorType.ItemType is TextDataViewType;
+            type is VectorDataViewType vectorType && vectorType.ItemType is TextDataViewType;
 
-        internal const string ExpectedColumnType = "vector of Text type";
+        internal const string ExpectedColumnType = "Vector of String";
 
         /// <summary>
         /// Removes stop words from incoming token streams in <paramref name="inputColumnName"/>
@@ -581,11 +610,11 @@ namespace Microsoft.ML.Transforms.Text
         /// <param name="columns">Pairs of columns to remove stop words on.</param>
         /// <param name="language">Langauge of the input text columns <paramref name="columns"/>.</param>
         internal StopWordsRemovingEstimator(IHostEnvironment env, (string outputColumnName, string inputColumnName)[] columns, Language language = Language.English)
-            : this(env, columns.Select(x => new ColumnInfo(x.outputColumnName, x.inputColumnName, language)).ToArray())
+            : this(env, columns.Select(x => new ColumnOptions(x.outputColumnName, x.inputColumnName, language)).ToArray())
         {
         }
 
-        internal StopWordsRemovingEstimator(IHostEnvironment env, params ColumnInfo[] columns)
+        internal StopWordsRemovingEstimator(IHostEnvironment env, params ColumnOptions[] columns)
             : base(Contracts.CheckRef(env, nameof(env)).Register(nameof(StopWordsRemovingEstimator)), new StopWordsRemovingTransformer(env, columns))
         {
         }
@@ -611,9 +640,7 @@ namespace Microsoft.ML.Transforms.Text
     }
 
     /// <summary>
-    /// Custom stopword remover removes specified list of stop words.
-    /// This is usually applied after tokenizing text, so it compares individual tokens
-    /// (case-insensitive comparison) to the stopwords.
+    /// <see cref="ITransformer"/> resulting from fitting a <see cref="CustomStopWordsRemovingEstimator"/>.
     /// </summary>
     public sealed class CustomStopWordsRemovingTransformer : OneToOneTransformerBase
     {
@@ -646,7 +673,7 @@ namespace Microsoft.ML.Transforms.Text
             public string DataFile;
 
             [Argument(ArgumentType.Multiple, HelpText = "Data loader", NullName = "<Auto>", SortOrder = 3, Visibility = ArgumentAttribute.VisibilityType.CmdLineOnly, SignatureType = typeof(SignatureDataLoader))]
-            internal IComponentFactory<IMultiStreamSource, IDataLoader> Loader;
+            internal IComponentFactory<IMultiStreamSource, ILegacyDataLoader> Loader;
 
             [Argument(ArgumentType.AtMostOnce, HelpText = "Name of the text column containing the stopwords", ShortName = "stopwordsCol", SortOrder = 4, Visibility = ArgumentAttribute.VisibilityType.CmdLineOnly)]
             public string StopwordsColumn;
@@ -662,12 +689,12 @@ namespace Microsoft.ML.Transforms.Text
             Desc = "Remover with list of stopwords specified by the user.")]
         internal sealed class LoaderArguments : ArgumentsBase, IStopWordsRemoverFactory
         {
-            public IDataTransform CreateComponent(IHostEnvironment env, IDataView input, OneToOneColumn[] column)
+            public ITransformer CreateComponent(IHostEnvironment env, IDataView input, OneToOneColumn[] column)
             {
                 if (Utils.Size(Stopword) > 0)
-                    return new CustomStopWordsRemovingTransformer(env, Stopwords, column.Select(x => (x.Name, x.Source)).ToArray()).Transform(input) as IDataTransform;
+                    return new CustomStopWordsRemovingTransformer(env, Stopwords, column.Select(x => (x.Name, x.Source)).ToArray());
                 else
-                    return new CustomStopWordsRemovingTransformer(env, Stopword, DataFile, StopwordsColumn, Loader, column.Select(x => (x.Name, x.Source)).ToArray()).Transform(input) as IDataTransform;
+                    return new CustomStopWordsRemovingTransformer(env, Stopword, DataFile, StopwordsColumn, Loader, column.Select(x => (x.Name, x.Source)).ToArray());
             }
         }
 
@@ -700,18 +727,18 @@ namespace Microsoft.ML.Transforms.Text
                 loaderAssemblyName: typeof(CustomStopWordsRemovingTransformer).Assembly.FullName);
         }
 
-        private static readonly DataViewType _outputType = new VectorType(TextDataViewType.Instance);
+        private static readonly DataViewType _outputType = new VectorDataViewType(TextDataViewType.Instance);
 
         private readonly NormStr.Pool _stopWordsMap;
         private const string RegistrationName = "CustomStopWordsRemover";
 
-        private IDataLoader GetLoaderForStopwords(IChannel ch, string dataFile,
-            IComponentFactory<IMultiStreamSource, IDataLoader> loader, ref string stopwordsCol)
+        private ILegacyDataLoader GetLoaderForStopwords(IChannel ch, string dataFile,
+            IComponentFactory<IMultiStreamSource, ILegacyDataLoader> loader, ref string stopwordsCol)
         {
             Host.CheckValue(ch, nameof(ch));
 
             MultiFileSource fileSource = new MultiFileSource(dataFile);
-            IDataLoader dataLoader;
+            ILegacyDataLoader dataLoader;
 
             // First column using the file.
             if (loader == null)
@@ -737,13 +764,19 @@ namespace Microsoft.ML.Transforms.Text
                 {
                     if (stopwordsCol == null)
                         stopwordsCol = "Stopwords";
-                    dataLoader = new TextLoader(
-                        Host,
-                        columns: new[]
+
+                    // Create text loader.
+                    var options = new TextLoader.Options()
+                    {
+                        Columns = new[]
                         {
-                            new TextLoader.Column(stopwordsCol, DataKind.TX, 0)
+                            new TextLoader.Column(stopwordsCol, DataKind.String, 0)
                         },
-                        dataSample: fileSource).Read(fileSource) as IDataLoader;
+                        Separators = new[] { ',' },
+                    };
+                    var textLoader = new TextLoader(Host, options: options, dataSample: fileSource);
+
+                    dataLoader = textLoader.Load(fileSource) as ILegacyDataLoader;
                 }
                 ch.AssertNonEmpty(stopwordsCol);
             }
@@ -753,7 +786,7 @@ namespace Microsoft.ML.Transforms.Text
         }
 
         private void LoadStopWords(IChannel ch, ReadOnlyMemory<char> stopwords, string dataFile, string stopwordsColumn,
-            IComponentFactory<IMultiStreamSource, IDataLoader> loaderFactory, out NormStr.Pool stopWordsMap)
+            IComponentFactory<IMultiStreamSource, ILegacyDataLoader> loaderFactory, out NormStr.Pool stopWordsMap)
         {
             Host.AssertValue(ch);
 
@@ -798,7 +831,7 @@ namespace Microsoft.ML.Transforms.Text
                 using (var cursor = loader.GetRowCursor(loader.Schema[srcCol]))
                 {
                     bool warnEmpty = true;
-                    var getter = cursor.GetGetter<ReadOnlyMemory<char>>(colSrcIndex);
+                    var getter = cursor.GetGetter<ReadOnlyMemory<char>>(cursor.Schema[colSrcIndex]);
                     while (cursor.MoveNext())
                     {
                         getter(ref src);
@@ -822,7 +855,7 @@ namespace Microsoft.ML.Transforms.Text
         /// <summary>
         /// The names of the input output column pairs on which this transformation is applied.
         /// </summary>
-        public IReadOnlyCollection<(string outputColumnName, string inputColumnName)> Columns => ColumnPairs.AsReadOnly();
+        internal IReadOnlyCollection<(string outputColumnName, string inputColumnName)> Columns => ColumnPairs.AsReadOnly();
 
         /// <summary>
         /// Custom stopword remover removes specified list of stop words.
@@ -849,7 +882,7 @@ namespace Microsoft.ML.Transforms.Text
         }
 
         internal CustomStopWordsRemovingTransformer(IHostEnvironment env, string stopwords,
-            string dataFile, string stopwordsColumn, IComponentFactory<IMultiStreamSource, IDataLoader> loader, params (string outputColumnName, string inputColumnName)[] columns) :
+            string dataFile, string stopwordsColumn, IComponentFactory<IMultiStreamSource, ILegacyDataLoader> loader, params (string outputColumnName, string inputColumnName)[] columns) :
             base(Contracts.CheckRef(env, nameof(env)).Register(RegistrationName), columns)
         {
             var ch = Host.Start("LoadStopWords");
@@ -999,7 +1032,7 @@ namespace Microsoft.ML.Transforms.Text
                     if (!StopWordsRemovingEstimator.IsColumnTypeValid(srcType))
                         throw Host.ExceptSchemaMismatch(nameof(inputSchema), "input", parent.ColumnPairs[i].inputColumnName, StopWordsRemovingEstimator.ExpectedColumnType, srcType.ToString());
 
-                    _types[i] = new VectorType(TextDataViewType.Instance);
+                    _types[i] = new VectorDataViewType(TextDataViewType.Instance);
                 }
             }
 
@@ -1021,7 +1054,7 @@ namespace Microsoft.ML.Transforms.Text
                 Host.Assert(0 <= iinfo && iinfo < _parent.ColumnPairs.Length);
                 disposer = null;
 
-                var getSrc = input.GetGetter<VBuffer<ReadOnlyMemory<char>>>(ColMapNewToOld[iinfo]);
+                var getSrc = input.GetGetter<VBuffer<ReadOnlyMemory<char>>>(input.Schema[ColMapNewToOld[iinfo]]);
                 var src = default(VBuffer<ReadOnlyMemory<char>>);
                 var buffer = new StringBuilder();
                 var list = new List<ReadOnlyMemory<char>>();
@@ -1054,12 +1087,39 @@ namespace Microsoft.ML.Transforms.Text
     }
 
     /// <summary>
-    /// Custom stopword remover removes specified list of stop words.
-    /// This is usually applied after tokenizing text, so it compares individual tokens
-    /// (case-insensitive comparison) to the stopwords.
+    /// <see cref="IEstimator{TTransformer}"/> for the <see cref="CustomStopWordsRemovingTransformer"/>.
     /// </summary>
+    /// <remarks>
+    /// <format type="text/markdown"><![CDATA[
+    /// ###  Estimator Characteristics
+    /// |  |  |
+    /// | -- | -- |
+    /// | Does this estimator need to look at the data to train its parameters? | No |
+    /// | Input column data type | Vector of [Text](xref:Microsoft.ML.Data.TextDataViewType) |
+    /// | Output column data type | Vector of [Text](xref:Microsoft.ML.Data.TextDataViewType) |
+    ///
+    /// The resulting <xref:Microsoft.ML.Transforms.Text.CustomStopWordsRemovingTransformer> creates a new column, named as specified by the output column name parameter, and
+    /// fills it with a vector of words containing all of the words in the input column except those given by the stopwords parameter.
+    /// All text comparison made by casting provided words and words from input column to lower case using casing rules of invariant culture.
+    ///
+    /// Check the See Also section for links to usage examples.
+    /// ]]>
+    /// </format>
+    /// </remarks>
+    /// <seealso cref="TextCatalog.RemoveStopWords(TransformsCatalog.TextTransforms, string, string, string[])" />
     public sealed class CustomStopWordsRemovingEstimator : TrivialEstimator<CustomStopWordsRemovingTransformer>
     {
+        /// <summary>
+        /// Use stop words remover that can removes language-specific list of stop words (most common words) already defined in the system.
+        /// </summary>
+        public sealed class Options : IStopWordsRemoverOptions
+        {
+            /// <summary>
+            /// List of stop words to remove.
+            /// </summary>
+            public string[] StopWords;
+        }
+
         internal const string ExpectedColumnType = "vector of Text type";
 
         /// <summary>

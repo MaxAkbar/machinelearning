@@ -5,7 +5,6 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
@@ -14,21 +13,69 @@ using Microsoft.ML.Internal.CpuMath;
 using Microsoft.ML.Internal.Internallearn;
 using Microsoft.ML.Internal.Utilities;
 using Microsoft.ML.Numeric;
-using Microsoft.ML.Trainers.KMeans;
-using Microsoft.ML.Training;
+using Microsoft.ML.Runtime;
+using Microsoft.ML.Trainers;
 
-[assembly: LoadableClass(KMeansPlusPlusTrainer.Summary, typeof(KMeansPlusPlusTrainer), typeof(KMeansPlusPlusTrainer.Options),
+[assembly: LoadableClass(KMeansTrainer.Summary, typeof(KMeansTrainer), typeof(KMeansTrainer.Options),
     new[] { typeof(SignatureClusteringTrainer), typeof(SignatureTrainer) },
-    KMeansPlusPlusTrainer.UserNameValue,
-    KMeansPlusPlusTrainer.LoadNameValue,
-    KMeansPlusPlusTrainer.ShortName, "KMeans")]
+    KMeansTrainer.UserNameValue,
+    KMeansTrainer.LoadNameValue,
+    KMeansTrainer.ShortName, "KMeans")]
 
-[assembly: LoadableClass(typeof(void), typeof(KMeansPlusPlusTrainer), null, typeof(SignatureEntryPointModule), "KMeans")]
+[assembly: LoadableClass(typeof(void), typeof(KMeansTrainer), null, typeof(SignatureEntryPointModule), "KMeans")]
 
-namespace Microsoft.ML.Trainers.KMeans
-    {
-    /// <include file='./doc.xml' path='doc/members/member[@name="KMeans++"]/*' />
-    public class KMeansPlusPlusTrainer : TrainerEstimatorBase<ClusteringPredictionTransformer<KMeansModelParameters>, KMeansModelParameters>
+namespace Microsoft.ML.Trainers
+{
+    /// <summary>
+    /// The <see cref="IEstimator{TTransformer}"/> for training a KMeans clusterer
+    /// </summary>
+    /// <remarks>
+    /// <format type="text/markdown"><![CDATA[
+    /// To create this trainer, use [KMeans](xref:Microsoft.ML.KMeansClusteringExtensions.KMeans(Microsoft.ML.ClusteringCatalog.ClusteringTrainers,System.String,System.String,System.Int32))
+    /// or [Kmeans(Options)](xref:Microsoft.ML.KMeansClusteringExtensions.KMeans(Microsoft.ML.ClusteringCatalog.ClusteringTrainers,Microsoft.ML.Trainers.KMeansTrainer.Options)).
+    ///
+    /// [!include[io](~/../docs/samples/docs/api-reference/io-columns-clustering.md)]
+    ///
+    /// ### Trainer Characteristics
+    /// |  |  |
+    /// | -- | -- |
+    /// | Machine learning task | Clustering |
+    /// | Is normalization required? | Yes |
+    /// | Is caching required? | Yes |
+    /// | Required NuGet in addition to Microsoft.ML | None |
+    ///
+    /// ### Training Algorithm Details
+    /// [K-means](https://en.wikipedia.org/wiki/K-means_clustering) is a popular clustering algorithm.
+    /// With K-means, the data is clustered into a specified number of clusters in order to minimize the within-cluster sum of squared distances.
+    /// This implementation follows the [Yinyang K-means method](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/ding15.pdf).
+    /// For choosing the initial cluster centeroids, one of three options can be used:
+    /// - Random initialization. This might lead to potentially bad approximations of the optimal clustering.
+    /// - The K-means++ method. This is an [improved initialization algorithm](https://en.wikipedia.org/wiki/K-means%2b%2b#Improved_initialization_algorithm)
+    /// introduced [here](http://ilpubs.stanford.edu:8090/778/1/2006-13.pdf) by Ding et al., that guarantees to find
+    /// a solution that is $O(log K)$ competitive to the optimal K-means solution.
+    /// - The K-means|| method. This method was introduced [here](https://theory.stanford.edu/~sergei/papers/vldb12-kmpar.pdf) by Bahmani et al., and uses
+    /// a parallel method that drastically reduces the number of passes needed to obtain a good initialization.
+    ///
+    /// K-means|| is the default initialization method. The other methods can be specified in the [Options](xref:Microsoft.ML.Trainers.KMeansTrainer.Options)
+    /// when creating the trainer using
+    /// [KMeansTrainer(Options)](xref:Microsoft.ML.KMeansClusteringExtensions.KMeans(Microsoft.ML.ClusteringCatalog.ClusteringTrainers,Microsoft.ML.Trainers.KMeansTrainer.Options)).
+    ///
+    /// ### Scoring Function
+    /// The output Score column contains the $L_2$-norm distance (i.e., [Euclidean distance](https://en.wikipedia.org/wiki/Euclidean_distance)) of the given input vector $\textbf{x}\in \mathbb{R}^n$ to each cluster's centroid.
+    /// Assume that the centriod of the $c$-th cluster is $\textbf{m}_c \in \mathbb{R}^n$.
+    /// The $c$-th value at the Score column would be $d_c = || \textbf{x} - \textbf{m}\_c ||\_2^2$.
+    /// The predicted label is the index with the smallest value in a $K$ dimensional vector $[d\_{0}, \dots, d\_{K-1}]$, where $K$ is the number of clusters.
+    ///
+    /// For more information on K-means, and K-means++ see:
+    /// [K-means](https://en.wikipedia.org/wiki/K-means_clustering)
+    /// [K-means++](https://en.wikipedia.org/wiki/K-means%2b%2b)
+    ///
+    /// Check the See Also section for links to usage examples.
+    /// ]]>
+    /// </format>
+    /// </remarks>
+    /// <seealso cref="Microsoft.ML.Trainers.KMeansTrainer" />
+    public class KMeansTrainer : TrainerEstimatorBase<ClusteringPredictionTransformer<KMeansModelParameters>, KMeansModelParameters>
     {
         internal const string LoadNameValue = "KMeansPlusPlus";
         internal const string UserNameValue = "KMeans++ Clustering";
@@ -37,21 +84,24 @@ namespace Microsoft.ML.Trainers.KMeans
             + "number of clusters in order to minimize the within-cluster sum of squares. K-means++ improves upon K-means by using a better "
             + "method for choosing the initial cluster centers.";
 
-        public enum InitAlgorithm
+        public enum InitializationAlgorithm
         {
             KMeansPlusPlus = 0,
             Random = 1,
-            KMeansParallel = 2
+            KMeansYinyang = 2
         }
 
         [BestFriend]
         internal static class Defaults
         {
             /// <value>The number of clusters.</value>
-            public const int ClustersCount = 5;
+            public const int NumberOfClusters = 5;
         }
 
-        public sealed class Options : UnsupervisedLearnerInputBaseWithWeight
+        /// <summary>
+        /// Options for the <see cref="KMeansTrainer"/> as used in [KMeansTrainer(Options)](xref:Microsoft.ML.KMeansClusteringExtensions.KMeans(Microsoft.ML.ClusteringCatalog.ClusteringTrainers,Microsoft.ML.Trainers.KMeansTrainer.Options)).
+        /// </summary>
+        public sealed class Options : UnsupervisedTrainerInputBaseWithWeight
         {
             /// <summary>
             /// The number of clusters.
@@ -59,13 +109,13 @@ namespace Microsoft.ML.Trainers.KMeans
             [Argument(ArgumentType.AtMostOnce, HelpText = "The number of clusters", SortOrder = 50, Name = "K")]
             [TGUI(SuggestedSweeps = "5,10,20,40")]
             [TlcModule.SweepableDiscreteParam("K", new object[] { 5, 10, 20, 40 })]
-            public int ClustersCount = Defaults.ClustersCount;
+            public int NumberOfClusters = Defaults.NumberOfClusters;
 
             /// <summary>
             /// Cluster initialization algorithm.
             /// </summary>
             [Argument(ArgumentType.AtMostOnce, HelpText = "Cluster initialization algorithm", ShortName = "init")]
-            public InitAlgorithm InitAlgorithm = InitAlgorithm.KMeansParallel;
+            public InitializationAlgorithm InitializationAlgorithm = InitializationAlgorithm.KMeansYinyang;
 
             /// <summary>
             /// Tolerance parameter for trainer convergence. Low = slower, more accurate.
@@ -78,9 +128,9 @@ namespace Microsoft.ML.Trainers.KMeans
             /// <summary>
             /// Maximum number of iterations.
             /// </summary>
-            [Argument(ArgumentType.AtMostOnce, HelpText = "Maximum number of iterations.", ShortName = "maxiter")]
+            [Argument(ArgumentType.AtMostOnce, HelpText = "Maximum number of iterations.", ShortName = "maxiter, NumberOfIterations")]
             [TGUI(Label = "Max Number of Iterations")]
-            public int MaxIterations = 1000;
+            public int MaximumNumberOfIterations = 1000;
 
             /// <summary>
             /// Memory budget (in MBs) to use for KMeans acceleration.
@@ -95,7 +145,7 @@ namespace Microsoft.ML.Trainers.KMeans
             /// </summary>
             [Argument(ArgumentType.AtMostOnce, HelpText = "Degree of lock-free parallelism. Defaults to automatic. Determinism not guaranteed.", ShortName = "nt,t,threads", SortOrder = 50)]
             [TGUI(Label = "Number of threads")]
-            public int? NumThreads;
+            public int? NumberOfThreads;
         }
 
         private readonly int _k;
@@ -104,7 +154,7 @@ namespace Microsoft.ML.Trainers.KMeans
         private readonly float _convergenceThreshold; // convergence thresholds
 
         private readonly long _accelMemBudgetMb;
-        private readonly InitAlgorithm _initAlgorithm;
+        private readonly InitializationAlgorithm _initAlgorithm;
         private readonly int _numThreads;
         private readonly string _featureColumn;
 
@@ -112,22 +162,22 @@ namespace Microsoft.ML.Trainers.KMeans
         private protected override PredictionKind PredictionKind => PredictionKind.Clustering;
 
         /// <summary>
-        /// Initializes a new instance of <see cref="KMeansPlusPlusTrainer"/>
+        /// Initializes a new instance of <see cref="KMeansTrainer"/>
         /// </summary>
         /// <param name="env">The <see cref="IHostEnvironment"/> to use.</param>
         /// <param name="options">The advanced options of the algorithm.</param>
-        internal KMeansPlusPlusTrainer(IHostEnvironment env, Options options)
-            : base(Contracts.CheckRef(env, nameof(env)).Register(LoadNameValue), TrainerUtils.MakeR4VecFeature(options.FeatureColumn), default, TrainerUtils.MakeR4ScalarWeightColumn(options.WeightColumn))
+        internal KMeansTrainer(IHostEnvironment env, Options options)
+            : base(Contracts.CheckRef(env, nameof(env)).Register(LoadNameValue), TrainerUtils.MakeR4VecFeature(options.FeatureColumnName), default, TrainerUtils.MakeR4ScalarWeightColumn(options.ExampleWeightColumnName))
         {
             Host.CheckValue(options, nameof(options));
-            Host.CheckUserArg(options.ClustersCount > 0, nameof(options.ClustersCount), "Must be positive");
+            Host.CheckUserArg(options.NumberOfClusters > 0, nameof(options.NumberOfClusters), "Must be positive");
 
-            _featureColumn = options.FeatureColumn;
+            _featureColumn = options.FeatureColumnName;
 
-            _k = options.ClustersCount;
+            _k = options.NumberOfClusters;
 
-            Host.CheckUserArg(options.MaxIterations > 0, nameof(options.MaxIterations), "Must be positive");
-            _maxIterations = options.MaxIterations;
+            Host.CheckUserArg(options.MaximumNumberOfIterations > 0, nameof(options.MaximumNumberOfIterations), "Must be positive");
+            _maxIterations = options.MaximumNumberOfIterations;
 
             Host.CheckUserArg(options.OptimizationTolerance > 0, nameof(options.OptimizationTolerance), "Tolerance must be positive");
             _convergenceThreshold = options.OptimizationTolerance;
@@ -135,11 +185,11 @@ namespace Microsoft.ML.Trainers.KMeans
             Host.CheckUserArg(options.AccelerationMemoryBudgetMb > 0, nameof(options.AccelerationMemoryBudgetMb), "Must be positive");
             _accelMemBudgetMb = options.AccelerationMemoryBudgetMb;
 
-            _initAlgorithm = options.InitAlgorithm;
+            _initAlgorithm = options.InitializationAlgorithm;
 
-            Host.CheckUserArg(!options.NumThreads.HasValue || options.NumThreads > 0, nameof(options.NumThreads),
+            Host.CheckUserArg(!options.NumberOfThreads.HasValue || options.NumberOfThreads > 0, nameof(options.NumberOfThreads),
                 "Must be either null or a positive integer.");
-            _numThreads = ComputeNumThreads(Host, options.NumThreads);
+            _numThreads = ComputeNumThreads(options.NumberOfThreads);
             Info = new TrainerInfo();
         }
 
@@ -185,12 +235,12 @@ namespace Microsoft.ML.Trainers.KMeans
             // all produce a valid set of output centroids with various trade-offs in runtime (with perhaps
             // random initialization creating a set that's not terribly useful.) They could also be extended to
             // pay attention to their incoming set of centroids and incrementally train.
-            if (_initAlgorithm == InitAlgorithm.KMeansPlusPlus)
+            if (_initAlgorithm == InitializationAlgorithm.KMeansPlusPlus)
             {
                 KMeansPlusPlusInit.Initialize(Host, _numThreads, ch, cursorFactory, _k, dimensionality,
                     centroids, out missingFeatureCount, out totalTrainingInstances);
             }
-            else if (_initAlgorithm == InitAlgorithm.Random)
+            else if (_initAlgorithm == InitializationAlgorithm.Random)
             {
                 KMeansRandomInit.Initialize(Host, _numThreads, ch, cursorFactory, _k,
                     centroids, out missingFeatureCount, out totalTrainingInstances);
@@ -220,18 +270,13 @@ namespace Microsoft.ML.Trainers.KMeans
             return new KMeansModelParameters(Host, _k, centroids, copyIn: true);
         }
 
-        private static int ComputeNumThreads(IHost host, int? argNumThreads)
+        private static int ComputeNumThreads(int? argNumThreads)
         {
             // REVIEW: For small data sets it would be nice to clamp down on concurrency, it
             // isn't going to get us a performance improvement.
-            int maxThreads;
-            if (host.ConcurrencyFactor < 1)
-                maxThreads = Environment.ProcessorCount / 2;
-            else
-                maxThreads = host.ConcurrencyFactor;
+            int maxThreads = Environment.ProcessorCount / 2;
 
-            // If we specified a number of threads that's fine, but it must be below the
-            // host-set concurrency factor.
+            // If we specified a number of threads that's fine, but it must be below maxThreads.
             if (argNumThreads.HasValue)
                 maxThreads = Math.Min(maxThreads, argNumThreads.Value);
 
@@ -249,9 +294,9 @@ namespace Microsoft.ML.Trainers.KMeans
             host.CheckValue(input, nameof(input));
             EntryPointUtils.CheckInputArgs(host, input);
 
-            return LearnerEntryPointsUtils.Train<Options, CommonOutputs.ClusteringOutput>(host, input,
-                () => new KMeansPlusPlusTrainer(host, input),
-                getWeight: () => LearnerEntryPointsUtils.FindColumn(host, input.TrainingData.Schema, input.WeightColumn));
+            return TrainerEntryPointsUtils.Train<Options, CommonOutputs.ClusteringOutput>(host, input,
+                () => new KMeansTrainer(host, input),
+                getWeight: () => TrainerEntryPointsUtils.FindColumn(host, input.TrainingData.Schema, input.ExampleWeightColumnName));
         }
 
         private protected override SchemaShape.Column[] GetOutputColumnsCore(SchemaShape inputSchema)
@@ -262,13 +307,13 @@ namespace Microsoft.ML.Trainers.KMeans
                         SchemaShape.Column.VectorKind.Vector,
                         NumberDataViewType.Single,
                         false,
-                        new SchemaShape(MetadataUtils.GetTrainerOutputMetadata())),
+                        new SchemaShape(AnnotationUtils.GetTrainerOutputAnnotation())),
 
                 new SchemaShape.Column(DefaultColumnNames.PredictedLabel,
                         SchemaShape.Column.VectorKind.Scalar,
                         NumberDataViewType.UInt32,
                         true,
-                        new SchemaShape(MetadataUtils.GetTrainerOutputMetadata()))
+                        new SchemaShape(AnnotationUtils.GetTrainerOutputAnnotation()))
             };
         }
 
@@ -744,10 +789,10 @@ namespace Microsoft.ML.Trainers.KMeans
             host.CheckValue(ch, nameof(ch));
             ch.CheckValue(cursorFactory, nameof(cursorFactory));
             ch.CheckValue(centroids, nameof(centroids));
-            ch.CheckUserArg(numThreads > 0, nameof(KMeansPlusPlusTrainer.Options.NumThreads), "Must be positive");
-            ch.CheckUserArg(k > 0, nameof(KMeansPlusPlusTrainer.Options.ClustersCount), "Must be positive");
+            ch.CheckUserArg(numThreads > 0, nameof(KMeansTrainer.Options.NumberOfThreads), "Must be positive");
+            ch.CheckUserArg(k > 0, nameof(KMeansTrainer.Options.NumberOfClusters), "Must be positive");
             ch.CheckParam(dimensionality > 0, nameof(dimensionality), "Must be positive");
-            ch.CheckUserArg(accelMemBudgetMb >= 0, nameof(KMeansPlusPlusTrainer.Options.AccelerationMemoryBudgetMb), "Must be non-negative");
+            ch.CheckUserArg(accelMemBudgetMb >= 0, nameof(KMeansTrainer.Options.AccelerationMemoryBudgetMb), "Must be non-negative");
 
             int numRounds;
             int numSamplesPerRound;

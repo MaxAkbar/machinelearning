@@ -3,7 +3,6 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
-using Microsoft.Data.DataView;
 using Microsoft.ML.Internal.Utilities;
 
 namespace Microsoft.ML.Data.DataLoadSave
@@ -11,8 +10,9 @@ namespace Microsoft.ML.Data.DataLoadSave
     /// <summary>
     /// A fake schema that is manufactured out of a SchemaShape.
     /// It will pretend that all vector sizes are equal to 10, all key value counts are equal to 10,
-    /// and all values are defaults (for metadata).
+    /// and all values are defaults (for annotations).
     /// </summary>
+    [BestFriend]
     internal static class FakeSchemaFactory
     {
         private const int AllVectorSizes = 10;
@@ -24,19 +24,19 @@ namespace Microsoft.ML.Data.DataLoadSave
 
             for (int i = 0; i < shape.Count; ++i)
             {
-                var metaBuilder = new DataViewSchema.Metadata.Builder();
-                var partialMetadata = shape[i].Metadata;
-                for (int j = 0; j < partialMetadata.Count; ++j)
+                var metaBuilder = new DataViewSchema.Annotations.Builder();
+                var partialAnnotations = shape[i].Annotations;
+                for (int j = 0; j < partialAnnotations.Count; ++j)
                 {
-                    var metaColumnType = MakeColumnType(partialMetadata[j]);
+                    var metaColumnType = MakeColumnType(partialAnnotations[j]);
                     Delegate del;
-                    if (metaColumnType is VectorType vectorType)
+                    if (metaColumnType is VectorDataViewType vectorType)
                         del = Utils.MarshalInvoke(GetDefaultVectorGetter<int>, vectorType.ItemType.RawType);
                     else
                         del = Utils.MarshalInvoke(GetDefaultGetter<int>, metaColumnType.RawType);
-                    metaBuilder.Add(partialMetadata[j].Name, metaColumnType, del);
+                    metaBuilder.Add(partialAnnotations[j].Name, metaColumnType, del);
                 }
-                builder.AddColumn(shape[i].Name, MakeColumnType(shape[i]), metaBuilder.ToMetadata());
+                builder.AddColumn(shape[i].Name, MakeColumnType(shape[i]), metaBuilder.ToAnnotations());
             }
             return builder.ToSchema();
         }
@@ -45,11 +45,11 @@ namespace Microsoft.ML.Data.DataLoadSave
         {
             DataViewType curType = column.ItemType;
             if (column.IsKey)
-                curType = new KeyType(((PrimitiveDataViewType)curType).RawType, AllKeySizes);
+                curType = new KeyDataViewType(((PrimitiveDataViewType)curType).RawType, AllKeySizes);
             if (column.Kind == SchemaShape.Column.VectorKind.VariableVector)
-                curType = new VectorType((PrimitiveDataViewType)curType, 0);
+                curType = new VectorDataViewType((PrimitiveDataViewType)curType, 0);
             else if (column.Kind == SchemaShape.Column.VectorKind.Vector)
-                curType = new VectorType((PrimitiveDataViewType)curType, AllVectorSizes);
+                curType = new VectorDataViewType((PrimitiveDataViewType)curType, AllVectorSizes);
             return curType;
         }
 

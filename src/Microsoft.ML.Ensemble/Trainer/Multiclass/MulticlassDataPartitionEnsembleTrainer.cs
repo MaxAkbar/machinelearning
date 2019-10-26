@@ -9,12 +9,12 @@ using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
 using Microsoft.ML.Internal.Internallearn;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Trainers.Ensemble;
-using Microsoft.ML.Training;
 
 [assembly: LoadableClass(MulticlassDataPartitionEnsembleTrainer.Summary, typeof(MulticlassDataPartitionEnsembleTrainer),
     typeof(MulticlassDataPartitionEnsembleTrainer.Arguments),
-    new[] { typeof(SignatureMultiClassClassifierTrainer), typeof(SignatureTrainer) },
+    new[] { typeof(SignatureMulticlassClassifierTrainer), typeof(SignatureTrainer) },
     MulticlassDataPartitionEnsembleTrainer.UserNameValue,
     MulticlassDataPartitionEnsembleTrainer.LoadNameValue)]
 
@@ -24,12 +24,14 @@ using Microsoft.ML.Training;
 namespace Microsoft.ML.Trainers.Ensemble
 {
     using TVectorPredictor = IPredictorProducing<VBuffer<Single>>;
+    using TVectorTrainer = ITrainerEstimator<ISingleFeaturePredictionTransformer<IPredictorProducing<VBuffer<float>>>, IPredictorProducing<VBuffer<float>>>;
+
     /// <summary>
     /// A generic ensemble classifier for multi-class classification
     /// </summary>
     internal sealed class MulticlassDataPartitionEnsembleTrainer :
-        EnsembleTrainerBase<VBuffer<Single>, EnsembleMultiClassModelParameters,
-        IMulticlassSubModelSelector, IMultiClassOutputCombiner>,
+        EnsembleTrainerBase<VBuffer<Single>,
+        IMulticlassSubModelSelector, IMulticlassOutputCombiner>,
         IModelCombiner
     {
         public const string LoadNameValue = "WeightedEnsembleMulticlass";
@@ -40,34 +42,29 @@ namespace Microsoft.ML.Trainers.Ensemble
         {
             [Argument(ArgumentType.Multiple, HelpText = "Algorithm to prune the base learners for selective Ensemble", ShortName = "pt", SortOrder = 4)]
             [TGUI(Label = "Sub-Model Selector(pruning) Type", Description = "Algorithm to prune the base learners for selective Ensemble")]
-            public ISupportMulticlassSubModelSelectorFactory SubModelSelectorType = new AllSelectorMultiClassFactory();
+            public ISupportMulticlassSubModelSelectorFactory SubModelSelectorType = new AllSelectorMulticlassFactory();
 
             [Argument(ArgumentType.Multiple, HelpText = "Output combiner", ShortName = "oc", SortOrder = 5)]
             [TGUI(Label = "Output combiner", Description = "Output combiner type")]
             public ISupportMulticlassOutputCombinerFactory OutputCombiner = new MultiMedian.Options();
 
             // REVIEW: If we make this public again it should be an *estimator* of this type of predictor, rather than the (deprecated) ITrainer.
-            [Argument(ArgumentType.Multiple, HelpText = "Base predictor type", ShortName = "bp,basePredictorTypes", SortOrder = 1, Visibility = ArgumentAttribute.VisibilityType.CmdLineOnly, SignatureType = typeof(SignatureMultiClassClassifierTrainer))]
-            internal IComponentFactory<ITrainer<TVectorPredictor>>[] BasePredictors;
+            [Argument(ArgumentType.Multiple, HelpText = "Base predictor type", ShortName = "bp,basePredictorTypes", SortOrder = 1, Visibility = ArgumentAttribute.VisibilityType.CmdLineOnly, SignatureType = typeof(SignatureMulticlassClassifierTrainer))]
+            internal IComponentFactory<TVectorTrainer>[] BasePredictors;
 
-            internal override IComponentFactory<ITrainer<TVectorPredictor>>[] GetPredictorFactories() => BasePredictors;
+            internal override IComponentFactory<TVectorTrainer>[] GetPredictorFactories() => BasePredictors;
 
             public Arguments()
             {
                 BasePredictors = new[]
                 {
-                    ComponentFactoryUtils.CreateFromFunction(
-                        env => {
-                            // Note that this illustrates a fundamnetal problem with the mixture of `ITrainer` and `ITrainerEstimator`
-                            // present in this class. The options to the estimator have no way of being communicated to the `ITrainer`
-                            // implementation, so there is a fundamnetal disconnect if someone chooses to ever use the *estimator* with
-                            // non-default column names. Unfortuantely no method of resolving this temporary strikes me as being any
-                            // less laborious than the proper fix, which is that this "meta" component should itself be a trainer
-                            // estimator, as opposed to a regular trainer.
-                            var trainerEstimator = new MulticlassLogisticRegression(env, LabelColumn, FeatureColumn);
-                            return TrainerUtils.MapTrainerEstimatorToTrainer<MulticlassLogisticRegression,
-                                MulticlassLogisticRegressionModelParameters, MulticlassLogisticRegressionModelParameters>(env, trainerEstimator);
-                        })
+                    // Note that this illustrates a fundamnetal problem with the mixture of `ITrainer` and `ITrainerEstimator`
+                    // present in this class. The options to the estimator have no way of being communicated to the `ITrainer`
+                    // implementation, so there is a fundamnetal disconnect if someone chooses to ever use the *estimator* with
+                    // non-default column names. Unfortuantely no method of resolving this temporary strikes me as being any
+                    // less laborious than the proper fix, which is that this "meta" component should itself be a trainer
+                    // estimator, as opposed to a regular trainer.
+                    ComponentFactoryUtils.CreateFromFunction(env => new LbfgsMaximumEntropyMulticlassTrainer(env, LabelColumnName, FeatureColumnName))
                 };
             }
         }
@@ -85,14 +82,14 @@ namespace Microsoft.ML.Trainers.Ensemble
         private MulticlassDataPartitionEnsembleTrainer(IHostEnvironment env, Arguments args, PredictionKind predictionKind)
             : this(env, args)
         {
-            Host.CheckParam(predictionKind == PredictionKind.MultiClassClassification, nameof(PredictionKind));
+            Host.CheckParam(predictionKind == PredictionKind.MulticlassClassification, nameof(PredictionKind));
         }
 
-        private protected override PredictionKind PredictionKind => PredictionKind.MultiClassClassification;
+        private protected override PredictionKind PredictionKind => PredictionKind.MulticlassClassification;
 
-        private protected override EnsembleMultiClassModelParameters CreatePredictor(List<FeatureSubsetModel<VBuffer<float>>> models)
+        private protected override IPredictor CreatePredictor(List<FeatureSubsetModel<VBuffer<float>>> models)
         {
-            return new EnsembleMultiClassModelParameters(Host, CreateModels<TVectorPredictor>(models), Combiner as IMultiClassOutputCombiner);
+            return new EnsembleMulticlassModelParameters(Host, CreateModels<TVectorPredictor>(models), Combiner as IMulticlassOutputCombiner);
         }
 
         public IPredictor CombineModels(IEnumerable<IPredictor> models)
@@ -101,7 +98,7 @@ namespace Microsoft.ML.Trainers.Ensemble
             Host.CheckParam(models.All(m => m is TVectorPredictor), nameof(models));
 
             var combiner = _outputCombiner.CreateComponent(Host);
-            var predictor = new EnsembleMultiClassModelParameters(Host,
+            var predictor = new EnsembleMulticlassModelParameters(Host,
                 models.Select(k => new FeatureSubsetModel<VBuffer<float>>((TVectorPredictor)k)).ToArray(),
                 combiner);
             return predictor;

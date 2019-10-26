@@ -6,15 +6,13 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
-using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Internallearn;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Model;
 using Microsoft.ML.Model.Pfa;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Transforms.Text;
 using Newtonsoft.Json.Linq;
 
@@ -33,10 +31,9 @@ using Newtonsoft.Json.Linq;
 namespace Microsoft.ML.Transforms.Text
 {
 
-    // The input for this transform is a ReadOnlyMemory or a vector of ReadOnlyMemory, and its output is a vector of ReadOnlyMemory<char>,
-    // corresponding to the tokens in the input text, split using a set of user specified separator characters.
-    // Empty strings and strings containing only spaces are dropped.
-    /// <include file='doc.xml' path='doc/members/member[@name="WordTokenizer"]/*' />
+    /// <summary>
+    /// <see cref="ITransformer"/> resulting from fitting an <see cref="WordTokenizingEstimator"/>.
+    /// </summary>
     public sealed class WordTokenizingTransformer : OneToOneTransformerBase
     {
         internal class Column : OneToOneColumn
@@ -106,16 +103,16 @@ namespace Microsoft.ML.Transforms.Text
 
         private const string RegistrationName = "DelimitedTokenize";
 
-        public IReadOnlyCollection<WordTokenizingEstimator.ColumnInfo> Columns => _columns.AsReadOnly();
-        private readonly WordTokenizingEstimator.ColumnInfo[] _columns;
+        internal IReadOnlyCollection<WordTokenizingEstimator.ColumnOptions> Columns => _columns.AsReadOnly();
+        private readonly WordTokenizingEstimator.ColumnOptions[] _columns;
 
-        private static (string name, string inputColumnName)[] GetColumnPairs(WordTokenizingEstimator.ColumnInfo[] columns)
+        private static (string name, string inputColumnName)[] GetColumnPairs(WordTokenizingEstimator.ColumnOptions[] columns)
         {
             Contracts.CheckNonEmpty(columns, nameof(columns));
             return columns.Select(x => (x.Name, x.InputColumnName)).ToArray();
         }
 
-        internal WordTokenizingTransformer(IHostEnvironment env, params WordTokenizingEstimator.ColumnInfo[] columns) :
+        internal WordTokenizingTransformer(IHostEnvironment env, params WordTokenizingEstimator.ColumnOptions[] columns) :
             base(Contracts.CheckRef(env, nameof(env)).Register(RegistrationName), GetColumnPairs(columns))
         {
             _columns = columns.ToArray();
@@ -132,7 +129,7 @@ namespace Microsoft.ML.Transforms.Text
             base(host, ctx)
         {
             var columnsLength = ColumnPairs.Length;
-            _columns = new WordTokenizingEstimator.ColumnInfo[columnsLength];
+            _columns = new WordTokenizingEstimator.ColumnOptions[columnsLength];
             // *** Binary format ***
             // <base>
             // for each added column
@@ -141,7 +138,7 @@ namespace Microsoft.ML.Transforms.Text
             {
                 var separators = ctx.Reader.ReadCharArray();
                 Contracts.CheckDecode(Utils.Size(separators) > 0);
-                _columns[i] = new WordTokenizingEstimator.ColumnInfo(ColumnPairs[i].outputColumnName, ColumnPairs[i].inputColumnName, separators);
+                _columns[i] = new WordTokenizingEstimator.ColumnOptions(ColumnPairs[i].outputColumnName, ColumnPairs[i].inputColumnName, separators);
             }
         }
 
@@ -161,7 +158,7 @@ namespace Microsoft.ML.Transforms.Text
             //   charArray: Separators
             SaveColumns(ctx);
             foreach (var column in _columns)
-                ctx.Writer.WriteCharArray(column.Separators);
+                ctx.Writer.WriteCharArray(column.SeparatorsArray);
         }
 
         // Factory method for SignatureLoadModel.
@@ -182,12 +179,12 @@ namespace Microsoft.ML.Transforms.Text
             env.CheckValue(input, nameof(input));
 
             env.CheckValue(options.Columns, nameof(options.Columns));
-            var cols = new WordTokenizingEstimator.ColumnInfo[options.Columns.Length];
+            var cols = new WordTokenizingEstimator.ColumnOptions[options.Columns.Length];
             for (int i = 0; i < cols.Length; i++)
             {
                 var item = options.Columns[i];
                 var separators = options.CharArrayTermSeparators ?? PredictionUtil.SeparatorFromString(item.TermSeparators ?? options.TermSeparators);
-                cols[i] = new WordTokenizingEstimator.ColumnInfo(item.Name, item.Source ?? item.Name, separators);
+                cols[i] = new WordTokenizingEstimator.ColumnOptions(item.Name, item.Source ?? item.Name, separators);
 
             }
             return new WordTokenizingTransformer(env, cols).MakeDataTransform(input);
@@ -211,13 +208,13 @@ namespace Microsoft.ML.Transforms.Text
               : base(parent.Host.Register(nameof(Mapper)), parent, inputSchema)
             {
                 _parent = parent;
-                _type = new VectorType(TextDataViewType.Instance);
+                _type = new VectorDataViewType(TextDataViewType.Instance);
                 _isSourceVector = new bool[_parent._columns.Length];
                 for (int i = 0; i < _isSourceVector.Length; i++)
                 {
                     inputSchema.TryGetColumnIndex(_parent._columns[i].InputColumnName, out int srcCol);
                     var srcType = inputSchema[srcCol].Type;
-                    _isSourceVector[i] = srcType is VectorType;
+                    _isSourceVector[i] = srcType is VectorDataViewType;
                 }
             }
 
@@ -243,7 +240,7 @@ namespace Microsoft.ML.Transforms.Text
                 var srcType = input.Schema[srcCol].Type;
                 Host.Assert(srcType.GetItemType() is TextDataViewType);
 
-                if (!(srcType is VectorType))
+                if (!(srcType is VectorDataViewType))
                     return MakeGetterOne(input, iinfo);
                 return MakeGetterVec(input, iinfo);
             }
@@ -251,10 +248,10 @@ namespace Microsoft.ML.Transforms.Text
             private ValueGetter<VBuffer<ReadOnlyMemory<char>>> MakeGetterOne(DataViewRow input, int iinfo)
             {
                 Host.AssertValue(input);
-                var getSrc = input.GetGetter<ReadOnlyMemory<char>>(ColMapNewToOld[iinfo]);
+                var getSrc = input.GetGetter<ReadOnlyMemory<char>>(input.Schema[ColMapNewToOld[iinfo]]);
                 var src = default(ReadOnlyMemory<char>);
                 var terms = new List<ReadOnlyMemory<char>>();
-                var separators = _parent._columns[iinfo].Separators;
+                var separators = _parent._columns[iinfo].SeparatorsArray;
 
                 return
                     (ref VBuffer<ReadOnlyMemory<char>> dst) =>
@@ -280,10 +277,10 @@ namespace Microsoft.ML.Transforms.Text
 
                 int cv = input.Schema[ColMapNewToOld[iinfo]].Type.GetVectorSize();
                 Contracts.Assert(cv >= 0);
-                var getSrc = input.GetGetter<VBuffer<ReadOnlyMemory<char>>>(ColMapNewToOld[iinfo]);
+                var getSrc = input.GetGetter<VBuffer<ReadOnlyMemory<char>>>(input.Schema[ColMapNewToOld[iinfo]]);
                 var src = default(VBuffer<ReadOnlyMemory<char>>);
                 var terms = new List<ReadOnlyMemory<char>>();
-                var separators = _parent._columns[iinfo].Separators;
+                var separators = _parent._columns[iinfo].SeparatorsArray;
 
                 return
                     (ref VBuffer<ReadOnlyMemory<char>> dst) =>
@@ -368,22 +365,22 @@ namespace Microsoft.ML.Transforms.Text
                 Contracts.Assert(CanSavePfa);
 
                 var exInfo = _parent._columns[iinfo];
-                var sep = PfaUtils.String("" + exInfo.Separators[0]);
+                var sep = PfaUtils.String("" + exInfo.SeparatorsArray[0]);
                 if (_isSourceVector[iinfo])
                 {
                     // If it's a vector, we'll concatenate them together.
                     srcToken = PfaUtils.Call("s.join", srcToken, sep);
                 }
 
-                if (exInfo.Separators.Length > 1)
+                if (exInfo.SeparatorsArray.Length > 1)
                 {
                     // Due to the intrinsics in PFA, it is much easier if we can do
                     // one split, rather than multiple splits. So, if there are multiple
                     // separators, we first replace them with the first separator, then
                     // split once on that one. This could also have been done with a.flatMap.
-                    for (int i = 1; i < exInfo.Separators.Length; ++i)
+                    for (int i = 1; i < exInfo.SeparatorsArray.Length; ++i)
                     {
-                        var postSep = PfaUtils.String("" + exInfo.Separators[i]);
+                        var postSep = PfaUtils.String("" + exInfo.SeparatorsArray[i]);
                         srcToken = PfaUtils.Call("s.replaceall", srcToken, postSep, sep);
                     }
                 }
@@ -399,21 +396,42 @@ namespace Microsoft.ML.Transforms.Text
     }
 
     /// <summary>
-    /// Word tokenizer splits text into tokens using the delimiter.
-    /// For each text input, the output column is a variable vector of text.
+    /// Tokenizes input text using specified delimiters.
     /// </summary>
+    /// <remarks>
+    /// <format type="text/markdown"><![CDATA[
+    ///
+    /// ###  Estimator Characteristics
+    /// |  |  |
+    /// | -- | -- |
+    /// | Does this estimator need to look at the data to train its parameters? | No |
+    /// | Input column data type | Scalar or Vector of [Text](xref:Microsoft.ML.Data.TextDataViewType)  |
+    /// | Output column data type | Variable-size vector of [Text](xref:Microsoft.ML.Data.TextDataViewType) |
+    ///
+    /// The resulting <xref:Microsoft.ML.Transforms.Text.WordTokenizingTransformer> creates a new column,
+    /// named as specified in the output column name parameters, where each input string is mapped to a vector of substrings obtained
+    /// by splitting the input string according to the user defined delimiters. The space character is the default delimiter.
+    ///
+    /// Empty strings and strings containing only spaces are dropped.
+    ///
+    /// Check the See Also section for links to usage examples.
+    /// ]]></format>
+    /// </remarks>
+    /// <seealso cref="TextCatalog.TokenizeIntoWords(TransformsCatalog.TextTransforms, string, string, char[])"/>
     public sealed class WordTokenizingEstimator : TrivialEstimator<WordTokenizingTransformer>
     {
         internal static bool IsColumnTypeValid(DataViewType type) => type.GetItemType() is TextDataViewType;
 
-        internal const string ExpectedColumnType = "Text";
+        internal const string ExpectedColumnType = "String or Vector of String";
 
         /// <summary>
         /// Tokenize incoming text in <paramref name="inputColumnName"/> and output the tokens as <paramref name="outputColumnName"/>.
         /// </summary>
         /// <param name="env">The environment.</param>
-        /// <param name="outputColumnName">Name of the column resulting from the transformation of <paramref name="inputColumnName"/>.</param>
-        /// <param name="inputColumnName">Name of the column to transform. If set to <see langword="null"/>, the value of the <paramref name="outputColumnName"/> will be used as source.</param>
+        /// <param name="outputColumnName">Name of the column resulting from the transformation of <paramref name="inputColumnName"/>.
+        /// The output column is of type variable vector of string.</param>
+        /// <param name="inputColumnName">Name of the column to transform. If set to <see langword="null"/>, the value of the <paramref name="outputColumnName"/> will be used as source.
+        /// This column should be of type string.</param>
         /// <param name="separators">The separators to use (uses space character by default).</param>
         internal WordTokenizingEstimator(IHostEnvironment env, string outputColumnName, string inputColumnName = null, char[] separators = null)
             : this(env, new[] { (outputColumnName, inputColumnName ?? outputColumnName) }, separators)
@@ -427,7 +445,7 @@ namespace Microsoft.ML.Transforms.Text
         /// <param name="columns">Pairs of columns to run the tokenization on.</param>
         /// <param name="separators">The separators to use (uses space character by default).</param>
         internal WordTokenizingEstimator(IHostEnvironment env, (string outputColumnName, string inputColumnName)[] columns, char[] separators = null)
-            : this(env, columns.Select(x => new ColumnInfo(x.outputColumnName, x.inputColumnName, separators)).ToArray())
+            : this(env, columns.Select(x => new ColumnOptions(x.outputColumnName, x.inputColumnName, separators)).ToArray())
         {
         }
 
@@ -436,15 +454,29 @@ namespace Microsoft.ML.Transforms.Text
         /// </summary>
         /// <param name="env">The environment.</param>
         /// <param name="columns">Pairs of columns to run the tokenization on.</param>
-        internal WordTokenizingEstimator(IHostEnvironment env, params ColumnInfo[] columns)
+        internal WordTokenizingEstimator(IHostEnvironment env, params ColumnOptions[] columns)
           : base(Contracts.CheckRef(env, nameof(env)).Register(nameof(WordTokenizingEstimator)), new WordTokenizingTransformer(env, columns))
         {
         }
-        public sealed class ColumnInfo
+        [BestFriend]
+        internal sealed class ColumnOptions
         {
+            /// <summary>
+            /// Output column name that will be used to store the tokenization result of <see cref="InputColumnName"/> column.
+            /// </summary>
             public readonly string Name;
+            /// <summary>
+            /// Input column name that will be tokenized into words.
+            /// </summary>
             public readonly string InputColumnName;
-            public readonly char[] Separators;
+            /// <summary>
+            /// Seperator list used to tokenize input string. If not specified, space will be used.
+            /// </summary>
+            public IReadOnlyList<char> Separators => SeparatorsArray;
+            /// <summary>
+            /// State of <see cref="Separators"/>. Since <see langword="char"/>[] is multable, it's not safe to directly expose this field to users.
+            /// </summary>
+            internal readonly char[] SeparatorsArray;
 
             /// <summary>
             /// Describes how the transformer handles one column pair.
@@ -452,11 +484,11 @@ namespace Microsoft.ML.Transforms.Text
             /// <param name="name">Name of the column resulting from the transformation of <paramref name="inputColumnName"/>.</param>
             /// <param name="inputColumnName">Name of column to transform. If set to <see langword="null"/>, the value of the <paramref name="name"/> will be used as source.</param>
             /// <param name="separators">Casing text using the rules of the invariant culture. If not specified, space will be used as separator.</param>
-            public ColumnInfo(string name, string inputColumnName = null, char[] separators = null)
+            public ColumnOptions(string name, string inputColumnName = null, char[] separators = null)
             {
                 Name = name;
                 InputColumnName = inputColumnName ?? name;
-                Separators = separators ?? new[] { ' ' };
+                SeparatorsArray = separators ?? new[] { ' ' };
             }
         }
 
@@ -480,5 +512,4 @@ namespace Microsoft.ML.Transforms.Text
             return new SchemaShape(result.Values);
         }
     }
-
 }

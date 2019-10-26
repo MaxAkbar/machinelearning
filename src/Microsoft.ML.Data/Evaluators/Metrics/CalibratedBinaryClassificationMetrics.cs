@@ -2,7 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.Data.DataView;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML.Data
 {
@@ -31,7 +31,7 @@ namespace Microsoft.ML.Data
         /// The log-loss reduction is scaled relative to a classifier that predicts the prior for every example:
         /// (LL(prior) - LL(classifier)) / LL(prior)
         /// This metric can be interpreted as the advantage of the classifier over a random prediction.
-        /// For example, if the RIG equals 20, it can be interpreted as &quot;the probability of a correct prediction is
+        /// For example, if the RIG equals 0.2, it can be interpreted as &quot;the probability of a correct prediction is
         /// 20% better than random guessing.&quot;
         /// </remarks>
         public double LogLossReduction { get; }
@@ -41,10 +41,10 @@ namespace Microsoft.ML.Data
         /// </summary>
         public double Entropy { get; }
 
-        internal CalibratedBinaryClassificationMetrics(IExceptionContext ectx, DataViewRow overallResult)
-            : base(ectx, overallResult)
+        internal CalibratedBinaryClassificationMetrics(IHost host, DataViewRow overallResult, IDataView confusionMatrix)
+            : base(host, overallResult, confusionMatrix)
         {
-            double Fetch(string name) => Fetch<double>(ectx, overallResult, name);
+            double Fetch(string name) => Fetch<double>(host, overallResult, name);
             LogLoss = Fetch(BinaryClassifierEvaluator.LogLoss);
             LogLossReduction = Fetch(BinaryClassifierEvaluator.LogLossReduction);
             Entropy = Fetch(BinaryClassifierEvaluator.Entropy);

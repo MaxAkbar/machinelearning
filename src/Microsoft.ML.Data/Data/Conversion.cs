@@ -9,8 +9,8 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
-using Microsoft.Data.DataView;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML.Data.Conversion
 {
@@ -110,6 +110,7 @@ namespace Microsoft.ML.Data.Conversion
             AddStd<I1, R4>(Convert);
             AddStd<I1, R8>(Convert);
             AddAux<I1, SB>(Convert);
+            AddStd<I1, BL>(Convert);
 
             AddStd<I2, I1>(Convert);
             AddStd<I2, I2>(Convert);
@@ -118,6 +119,7 @@ namespace Microsoft.ML.Data.Conversion
             AddStd<I2, R4>(Convert);
             AddStd<I2, R8>(Convert);
             AddAux<I2, SB>(Convert);
+            AddStd<I2, BL>(Convert);
 
             AddStd<I4, I1>(Convert);
             AddStd<I4, I2>(Convert);
@@ -126,6 +128,7 @@ namespace Microsoft.ML.Data.Conversion
             AddStd<I4, R4>(Convert);
             AddStd<I4, R8>(Convert);
             AddAux<I4, SB>(Convert);
+            AddStd<I4, BL>(Convert);
 
             AddStd<I8, I1>(Convert);
             AddStd<I8, I2>(Convert);
@@ -134,6 +137,7 @@ namespace Microsoft.ML.Data.Conversion
             AddStd<I8, R4>(Convert);
             AddStd<I8, R8>(Convert);
             AddAux<I8, SB>(Convert);
+            AddStd<I8, BL>(Convert);
 
             AddStd<U1, U1>(Convert);
             AddStd<U1, U2>(Convert);
@@ -143,6 +147,7 @@ namespace Microsoft.ML.Data.Conversion
             AddStd<U1, R4>(Convert);
             AddStd<U1, R8>(Convert);
             AddAux<U1, SB>(Convert);
+            AddStd<U1, BL>(Convert);
 
             AddStd<U2, U1>(Convert);
             AddStd<U2, U2>(Convert);
@@ -152,6 +157,7 @@ namespace Microsoft.ML.Data.Conversion
             AddStd<U2, R4>(Convert);
             AddStd<U2, R8>(Convert);
             AddAux<U2, SB>(Convert);
+            AddStd<U2, BL>(Convert);
 
             AddStd<U4, U1>(Convert);
             AddStd<U4, U2>(Convert);
@@ -161,6 +167,7 @@ namespace Microsoft.ML.Data.Conversion
             AddStd<U4, R4>(Convert);
             AddStd<U4, R8>(Convert);
             AddAux<U4, SB>(Convert);
+            AddStd<U4, BL>(Convert);
 
             AddStd<U8, U1>(Convert);
             AddStd<U8, U2>(Convert);
@@ -170,6 +177,7 @@ namespace Microsoft.ML.Data.Conversion
             AddStd<U8, R4>(Convert);
             AddStd<U8, R8>(Convert);
             AddAux<U8, SB>(Convert);
+            AddStd<U8, BL>(Convert);
 
             AddStd<UG, U1>(Convert);
             AddStd<UG, U2>(Convert);
@@ -179,11 +187,13 @@ namespace Microsoft.ML.Data.Conversion
             AddAux<UG, SB>(Convert);
 
             AddStd<R4, R4>(Convert);
+            AddStd<R4, BL>(Convert);
             AddStd<R4, R8>(Convert);
             AddAux<R4, SB>(Convert);
 
             AddStd<R8, R4>(Convert);
             AddStd<R8, R8>(Convert);
+            AddStd<R8, BL>(Convert);
             AddAux<R8, SB>(Convert);
 
             AddStd<TX, I1>(Convert);
@@ -221,6 +231,7 @@ namespace Microsoft.ML.Data.Conversion
             AddStd<DT, I8>(Convert);
             AddStd<DT, R4>(Convert);
             AddStd<DT, R8>(Convert);
+            AddStd<DT, DT>(Convert);
             AddAux<DT, SB>(Convert);
 
             AddStd<DZ, I8>(Convert);
@@ -383,11 +394,11 @@ namespace Microsoft.ML.Data.Conversion
 
             conv = null;
             identity = false;
-            if (typeSrc is KeyType keySrc)
+            if (typeSrc is KeyDataViewType keySrc)
             {
                 // Key types are only convertable to compatible key types or unsigned integer
                 // types that are large enough.
-                if (typeDst is KeyType keyDst)
+                if (typeDst is KeyDataViewType keyDst)
                 {
                     // REVIEW: Should we allow the counts to vary? Allowing the dst to be bigger is trivial.
                     // Smaller dst means mapping values to NA.
@@ -399,7 +410,7 @@ namespace Microsoft.ML.Data.Conversion
                     // Technically there is no standard conversion from a key type to an unsigned integer type,
                     // but it's very convenient for client code, so we allow it here. Note that ConvertTransform
                     // does not allow this.
-                    if (!KeyType.IsValidDataType(typeDst.RawType))
+                    if (!KeyDataViewType.IsValidDataType(typeDst.RawType))
                         return false;
                     if (Marshal.SizeOf(keySrc.RawType) > Marshal.SizeOf(typeDst.RawType))
                     {
@@ -411,7 +422,7 @@ namespace Microsoft.ML.Data.Conversion
                 // REVIEW: Should we look for illegal values and force them to zero? If so, then
                 // we'll need to set identity to false.
             }
-            else if (typeDst is KeyType keyDst)
+            else if (typeDst is KeyDataViewType keyDst)
             {
                 if (!(typeSrc is TextDataViewType))
                     return false;
@@ -421,8 +432,8 @@ namespace Microsoft.ML.Data.Conversion
             else if (!typeDst.IsStandardScalar())
                 return false;
 
-            Contracts.Assert(typeSrc is KeyType || typeSrc.IsStandardScalar());
-            Contracts.Assert(typeDst is KeyType || typeDst.IsStandardScalar());
+            Contracts.Assert(typeSrc is KeyDataViewType || typeSrc.IsStandardScalar());
+            Contracts.Assert(typeDst is KeyDataViewType || typeDst.IsStandardScalar());
 
             identity = typeSrc.RawType == typeDst.RawType;
             var key = (typeSrc.RawType, typeDst.RawType);
@@ -450,7 +461,7 @@ namespace Microsoft.ML.Data.Conversion
             Contracts.CheckValue(type, nameof(type));
             Contracts.Check(type.RawType == typeof(TSrc), "Wrong TSrc type argument");
 
-            if (type is KeyType keyType)
+            if (type is KeyDataViewType keyType)
             {
                 // Key string conversion always works.
                 conv = GetKeyStringConversion<TSrc>(keyType);
@@ -472,7 +483,7 @@ namespace Microsoft.ML.Data.Conversion
             return false;
         }
 
-        public ValueMapper<TSrc, SB> GetKeyStringConversion<TSrc>(KeyType key)
+        public ValueMapper<TSrc, SB> GetKeyStringConversion<TSrc>(KeyDataViewType key)
         {
             Contracts.Check(key.RawType == typeof(TSrc));
 
@@ -500,18 +511,18 @@ namespace Microsoft.ML.Data.Conversion
         public TryParseMapper<TDst> GetTryParseConversion<TDst>(DataViewType typeDst)
         {
             Contracts.CheckValue(typeDst, nameof(typeDst));
-            Contracts.CheckParam(typeDst.IsStandardScalar() || typeDst is KeyType, nameof(typeDst),
+            Contracts.CheckParam(typeDst.IsStandardScalar() || typeDst is KeyDataViewType, nameof(typeDst),
                 "Parse conversion only supported for standard types");
             Contracts.Check(typeDst.RawType == typeof(TDst), "Wrong TDst type parameter");
 
-            if (typeDst is KeyType keyType)
+            if (typeDst is KeyDataViewType keyType)
                 return GetKeyTryParse<TDst>(keyType);
 
             Contracts.Assert(_tryParseDelegates.ContainsKey(typeDst.RawType));
             return (TryParseMapper<TDst>)_tryParseDelegates[typeDst.RawType];
         }
 
-        private TryParseMapper<TDst> GetKeyTryParse<TDst>(KeyType key)
+        private TryParseMapper<TDst> GetKeyTryParse<TDst>(KeyDataViewType key)
         {
             Contracts.Assert(key.RawType == typeof(TDst));
 
@@ -533,14 +544,14 @@ namespace Microsoft.ML.Data.Conversion
                 };
         }
 
-        private Delegate GetKeyParse(KeyType key)
+        private Delegate GetKeyParse(KeyDataViewType key)
         {
-            Func<KeyType, ValueMapper<TX, int>> del = GetKeyParse<int>;
+            Func<KeyDataViewType, ValueMapper<TX, int>> del = GetKeyParse<int>;
             var meth = del.GetMethodInfo().GetGenericMethodDefinition().MakeGenericMethod(key.RawType);
             return (Delegate)meth.Invoke(this, new object[] { key });
         }
 
-        private ValueMapper<TX, TDst> GetKeyParse<TDst>(KeyType key)
+        private ValueMapper<TX, TDst> GetKeyParse<TDst>(KeyDataViewType key)
         {
             Contracts.Assert(key.RawType == typeof(TDst));
 
@@ -584,12 +595,12 @@ namespace Microsoft.ML.Data.Conversion
         public InPredicate<T> GetIsDefaultPredicate<T>(DataViewType type)
         {
             Contracts.CheckValue(type, nameof(type));
-            Contracts.CheckParam(!(type is VectorType), nameof(type));
+            Contracts.CheckParam(!(type is VectorDataViewType), nameof(type));
             Contracts.CheckParam(type.RawType == typeof(T), nameof(type));
 
             var t = type;
             Delegate del;
-            if (!t.IsStandardScalar() && !(t is KeyType) || !_isDefaultDelegates.TryGetValue(t.RawType, out del))
+            if (!t.IsStandardScalar() && !(t is KeyDataViewType) || !_isDefaultDelegates.TryGetValue(t.RawType, out del))
                 throw Contracts.Except("No IsDefault predicate for '{0}'", type);
 
             return (InPredicate<T>)del;
@@ -623,10 +634,10 @@ namespace Microsoft.ML.Data.Conversion
         public bool TryGetIsNAPredicate(DataViewType type, out Delegate del)
         {
             Contracts.CheckValue(type, nameof(type));
-            Contracts.CheckParam(!(type is VectorType), nameof(type));
+            Contracts.CheckParam(!(type is VectorDataViewType), nameof(type));
 
             var t = type;
-            if (t is KeyType)
+            if (t is KeyDataViewType)
             {
                 // REVIEW: Should we test for out of range when KeyCount > 0?
                 Contracts.Assert(_isDefaultDelegates.ContainsKey(t.RawType));
@@ -642,14 +653,14 @@ namespace Microsoft.ML.Data.Conversion
             return true;
         }
 
-        public InPredicate<VBuffer<T>> GetHasMissingPredicate<T>(VectorType type)
+        public InPredicate<VBuffer<T>> GetHasMissingPredicate<T>(VectorDataViewType type)
         {
             Contracts.CheckValue(type, nameof(type));
             Contracts.CheckParam(type.ItemType.RawType == typeof(T), nameof(type));
 
             var t = type.ItemType;
             Delegate del;
-            if (t is KeyType)
+            if (t is KeyDataViewType)
             {
                 // REVIEW: Should we test for out of range when KeyCount > 0?
                 Contracts.Assert(_hasZeroDelegates.ContainsKey(t.RawType));
@@ -900,6 +911,19 @@ namespace Microsoft.ML.Data.Conversion
         public void Convert(in DZ src, ref SB dst) { ClearDst(ref dst); dst.AppendFormat("{0:o}", src); }
         #endregion ToStringBuilder
 
+        #region ToBL
+        public void Convert(in R8 src, ref BL dst) => dst = System.Convert.ToBoolean(src);
+        public void Convert(in R4 src, ref BL dst) => dst = System.Convert.ToBoolean(src);
+        public void Convert(in I1 src, ref BL dst) => dst = System.Convert.ToBoolean(src);
+        public void Convert(in I2 src, ref BL dst) => dst = System.Convert.ToBoolean(src);
+        public void Convert(in I4 src, ref BL dst) => dst = System.Convert.ToBoolean(src);
+        public void Convert(in I8 src, ref BL dst) => dst = System.Convert.ToBoolean(src);
+        public void Convert(in U1 src, ref BL dst) => dst = System.Convert.ToBoolean(src);
+        public void Convert(in U2 src, ref BL dst) => dst = System.Convert.ToBoolean(src);
+        public void Convert(in U4 src, ref BL dst) => dst = System.Convert.ToBoolean(src);
+        public void Convert(in U8 src, ref BL dst) => dst = System.Convert.ToBoolean(src);
+        #endregion
+
         #region FromR4
         public void Convert(in R4 src, ref R4 dst) => dst = src;
         public void Convert(in R4 src, ref R8 dst) => dst = src;
@@ -1138,7 +1162,7 @@ namespace Microsoft.ML.Data.Conversion
             dst = res;
             return true;
 
-            LFail:
+        LFail:
             dst = 0;
             return false;
         }
@@ -1245,7 +1269,7 @@ namespace Microsoft.ML.Data.Conversion
             result = res;
             return true;
 
-            LFail:
+        LFail:
             result = 0;
             return false;
         }
@@ -1642,13 +1666,17 @@ namespace Microsoft.ML.Data.Conversion
         #endregion FromTX
 
         #region FromBL
-        public void Convert(in BL src, ref I1 dst) => dst = (I1)(object)src;
-        public void Convert(in BL src, ref I2 dst) => dst = (I2)(object)src;
-        public void Convert(in BL src, ref I4 dst) => dst = (I4)(object)src;
-        public void Convert(in BL src, ref I8 dst) => dst = (I8)(object)src;
+        public void Convert(in BL src, ref I1 dst) => dst = System.Convert.ToSByte(src);
+        public void Convert(in BL src, ref I2 dst) => dst = System.Convert.ToInt16(src);
+        public void Convert(in BL src, ref I4 dst) => dst = System.Convert.ToInt32(src);
+        public void Convert(in BL src, ref I8 dst) => dst = System.Convert.ToInt64(src);
         public void Convert(in BL src, ref R4 dst) => dst = System.Convert.ToSingle(src);
         public void Convert(in BL src, ref R8 dst) => dst = System.Convert.ToDouble(src);
         public void Convert(in BL src, ref BL dst) => dst = src;
         #endregion FromBL
+
+        #region ToDT
+        public void Convert(in DT src, ref DT dst) => dst = src;
+        #endregion ToDT
     }
 }

@@ -7,17 +7,19 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Model;
+using Microsoft.ML.Runtime;
 
-[assembly: LoadableClass(TextLoader.Summary, typeof(IDataLoader), typeof(TextLoader), typeof(TextLoader.Options), typeof(SignatureDataLoader),
+[assembly: LoadableClass(TextLoader.Summary, typeof(ILegacyDataLoader), typeof(TextLoader), typeof(TextLoader.Options), typeof(SignatureDataLoader),
     "Text Loader", "TextLoader", "Text", DocName = "loader/TextLoader.md")]
 
-[assembly: LoadableClass(TextLoader.Summary, typeof(IDataLoader), typeof(TextLoader), null, typeof(SignatureLoadDataLoader),
+[assembly: LoadableClass(TextLoader.Summary, typeof(ILegacyDataLoader), typeof(TextLoader), null, typeof(SignatureLoadDataLoader),
+    "Text Loader", TextLoader.LoaderSignature)]
+
+[assembly: LoadableClass(TextLoader.Summary, typeof(TextLoader), null, typeof(SignatureLoadModel),
     "Text Loader", TextLoader.LoaderSignature)]
 
 namespace Microsoft.ML.Data
@@ -25,7 +27,7 @@ namespace Microsoft.ML.Data
     /// <summary>
     /// Loads a text file into an IDataView. Supports basic mapping from input columns to <see cref="IDataView"/> columns.
     /// </summary>
-    public sealed partial class TextLoader : IDataReader<IMultiStreamSource>, ICanSaveModel
+    public sealed partial class TextLoader : IDataLoader<IMultiStreamSource>
     {
         /// <summary>
         /// Describes how an input column should be mapped to an <see cref="IDataView"/> column.
@@ -49,20 +51,10 @@ namespace Microsoft.ML.Data
             /// Describes how an input column should be mapped to an <see cref="IDataView"/> column.
             /// </summary>
             /// <param name="name">Name of the column.</param>
-            /// <param name="type"><see cref="DataKind"/> of the items in the column. If <see langword="null"/> defaults to a float.</param>
+            /// <param name="dataKind"><see cref="Data.DataKind"/> of the items in the column.</param>
             /// <param name="index">Index of the column.</param>
-            public Column(string name, DataKind? type, int index)
-               : this(name, type, new[] { new Range(index) }) { }
-
-            /// <summary>
-            /// Describes how an input column should be mapped to an <see cref="IDataView"/> column.
-            /// </summary>
-            /// <param name="name">Name of the column.</param>
-            /// <param name="type"><see cref="DataKind"/> of the items in the column. If <see langword="null"/> defaults to a float.</param>
-            /// <param name="minIndex">The minimum inclusive index of the column.</param>
-            /// <param name="maxIndex">The maximum-inclusive index of the column.</param>
-            public Column(string name, DataKind? type, int minIndex, int maxIndex)
-                : this(name, type, new[] { new Range(minIndex, maxIndex) })
+            public Column(string name, DataKind dataKind, int index)
+                : this(name, dataKind.ToInternalDataKind(), new[] { new Range(index) })
             {
             }
 
@@ -70,16 +62,40 @@ namespace Microsoft.ML.Data
             /// Describes how an input column should be mapped to an <see cref="IDataView"/> column.
             /// </summary>
             /// <param name="name">Name of the column.</param>
-            /// <param name="type"><see cref="DataKind"/> of the items in the column. If <see langword="null"/> defaults to a float.</param>
+            /// <param name="dataKind"><see cref="Data.DataKind"/> of the items in the column.</param>
+            /// <param name="minIndex">The minimum inclusive index of the column.</param>
+            /// <param name="maxIndex">The maximum-inclusive index of the column.</param>
+            public Column(string name, DataKind dataKind, int minIndex, int maxIndex)
+                : this(name, dataKind.ToInternalDataKind(), new[] { new Range(minIndex, maxIndex) })
+            {
+            }
+
+            /// <summary>
+            /// Describes how an input column should be mapped to an <see cref="IDataView"/> column.
+            /// </summary>
+            /// <param name="name">Name of the column.</param>
+            /// <param name="dataKind"><see cref="Data.DataKind"/> of the items in the column.</param>
             /// <param name="source">Source index range(s) of the column.</param>
             /// <param name="keyCount">For a key column, this defines the range of values.</param>
-            public Column(string name, DataKind? type, Range[] source, KeyCount keyCount = null)
+            public Column(string name, DataKind dataKind, Range[] source, KeyCount keyCount = null)
+                : this(name, dataKind.ToInternalDataKind(), source, keyCount)
+            {
+            }
+
+            /// <summary>
+            /// Describes how an input column should be mapped to an <see cref="IDataView"/> column.
+            /// </summary>
+            /// <param name="name">Name of the column.</param>
+            /// <param name="kind"><see cref="InternalDataKind"/> of the items in the column.</param>
+            /// <param name="source">Source index range(s) of the column.</param>
+            /// <param name="keyCount">For a key column, this defines the range of values.</param>
+            private Column(string name, InternalDataKind kind, Range[] source, KeyCount keyCount = null)
             {
                 Contracts.CheckValue(name, nameof(name));
                 Contracts.CheckValue(source, nameof(source));
 
                 Name = name;
-                Type = type;
+                Type = kind;
                 Source = source;
                 KeyCount = keyCount;
             }
@@ -91,10 +107,22 @@ namespace Microsoft.ML.Data
             public string Name;
 
             /// <summary>
-            /// <see cref="DataKind"/> of the items in the column. If <see langword="null"/> defaults to a float.
+            /// <see cref="InternalDataKind"/> of the items in the column. It defaults to float.
+            /// Although <see cref="InternalDataKind"/> is internal, <see cref="Type"/>'s information can be publically accessed by <see cref="DataKind"/>.
             /// </summary>
             [Argument(ArgumentType.AtMostOnce, HelpText = "Type of the items in the column")]
-            public DataKind? Type;
+            [BestFriend]
+            internal InternalDataKind Type = InternalDataKind.R4;
+
+            /// <summary>
+            /// <see cref="Data.DataKind"/> of the items in the column.
+            /// </summary>
+            /// It's a public interface to access the information in an internal DataKind.
+            public DataKind DataKind
+            {
+                get { return Type.ToDataKind(); }
+                set { Type = value.ToInternalDataKind(); }
+            }
 
             /// <summary>
             /// Source index range(s) of the column.
@@ -132,10 +160,10 @@ namespace Microsoft.ML.Data
                     return false;
                 if (rgstr.Length == 3)
                 {
-                    DataKind kind;
+                    InternalDataKind kind;
                     if (!TypeParsingUtils.TryParseDataKind(rgstr[istr++], out kind, out KeyCount))
                         return false;
-                    Type = kind == default ? default(DataKind?) : kind;
+                    Type = kind == default ? InternalDataKind.R4 : kind;
                 }
 
                 return TryParseSource(rgstr[istr++]);
@@ -173,10 +201,10 @@ namespace Microsoft.ML.Data
                 int ich = sb.Length;
                 sb.Append(Name);
                 sb.Append(':');
-                if (Type != null || KeyCount != null)
+                if (Type != default || KeyCount != null)
                 {
-                    if (Type != null)
-                        sb.Append(Type.Value.GetString());
+                    if (Type != default)
+                        sb.Append(Type.GetString());
                     if (KeyCount != null)
                     {
                         sb.Append('[');
@@ -536,7 +564,7 @@ namespace Microsoft.ML.Data
         {
             public readonly string Name;
             // REVIEW: Fix this for keys.
-            public readonly DataKind Kind;
+            public readonly InternalDataKind Kind;
             public readonly DataViewType ColType;
             public readonly Segment[] Segments;
 
@@ -604,9 +632,9 @@ namespace Microsoft.ML.Data
 
                 DataViewType type = itemType;
                 if (isegVar >= 0)
-                    type = new VectorType(itemType);
+                    type = new VectorDataViewType(itemType);
                 else if (size > 1 || segs[0].ForceVector)
-                    type = new VectorType(itemType, size);
+                    type = new VectorDataViewType(itemType, size);
 
                 return new ColInfo(name, type, segs, isegVar, size);
             }
@@ -619,8 +647,8 @@ namespace Microsoft.ML.Data
             /// </summary>
             public readonly ColInfo[] Infos;
             /// <summary>
-            /// <see cref="Infos"/>[i] stores the i-th column's metadata, named <see cref="MetadataUtils.Kinds.SlotNames"/>
-            /// in <see cref="DataViewSchema.Metadata"/>.
+            /// <see cref="Infos"/>[i] stores the i-th column's metadata, named <see cref="AnnotationUtils.Kinds.SlotNames"/>
+            /// in <see cref="DataViewSchema.Annotations"/>.
             /// </summary>
             private readonly VBuffer<ReadOnlyMemory<char>>[] _slotNames;
             /// <summary>
@@ -696,15 +724,15 @@ namespace Microsoft.ML.Data
                             ch.Info("Duplicate name(s) specified - later columns will hide earlier ones");
 
                         PrimitiveDataViewType itemType;
-                        DataKind kind;
+                        InternalDataKind kind;
                         if (col.KeyCount != null)
                         {
                             itemType = TypeParsingUtils.ConstructKeyType(col.Type, col.KeyCount);
                         }
                         else
                         {
-                            kind = col.Type ?? DataKind.Num;
-                            ch.CheckUserArg(Enum.IsDefined(typeof(DataKind), kind), nameof(Column.Type), "Bad item type");
+                            kind = col.Type == default ? InternalDataKind.R4 : col.Type;
+                            ch.CheckUserArg(Enum.IsDefined(typeof(InternalDataKind), kind), nameof(Column.Type), "Bad item type");
                             itemType = ColumnTypeExtensions.PrimitiveTypeFromKind(kind);
                         }
 
@@ -861,13 +889,13 @@ namespace Microsoft.ML.Data
                     string name = ctx.LoadNonEmptyString();
 
                     PrimitiveDataViewType itemType;
-                    var kind = (DataKind)ctx.Reader.ReadByte();
-                    Contracts.CheckDecode(Enum.IsDefined(typeof(DataKind), kind));
+                    var kind = (InternalDataKind)ctx.Reader.ReadByte();
+                    Contracts.CheckDecode(Enum.IsDefined(typeof(InternalDataKind), kind));
                     bool isKey = ctx.Reader.ReadBoolByte();
                     if (isKey)
                     {
                         ulong count;
-                        Contracts.CheckDecode(KeyType.IsValidDataType(kind.ToType()));
+                        Contracts.CheckDecode(KeyDataViewType.IsValidDataType(kind.ToType()));
 
                         // Special treatment for versions that had Min and Contiguous fields in KeyType.
                         if (ctx.Header.ModelVerWritten < VersionNoMinCount)
@@ -889,7 +917,7 @@ namespace Microsoft.ML.Data
                             count = ctx.Reader.ReadUInt64();
                             Contracts.CheckDecode(0 < count);
                         }
-                        itemType = new KeyType(kind.ToType(), count);
+                        itemType = new KeyDataViewType(kind.ToType(), count);
                     }
                     else
                         itemType = ColumnTypeExtensions.PrimitiveTypeFromKind(kind);
@@ -948,11 +976,11 @@ namespace Microsoft.ML.Data
                     var info = Infos[iinfo];
                     ctx.SaveNonEmptyString(info.Name);
                     var type = info.ColType.GetItemType();
-                    DataKind rawKind = type.GetRawKind();
-                    Contracts.Assert((DataKind)(byte)rawKind == rawKind);
+                    InternalDataKind rawKind = type.GetRawKind();
+                    Contracts.Assert((InternalDataKind)(byte)rawKind == rawKind);
                     ctx.Writer.Write((byte)rawKind);
-                    ctx.Writer.WriteBoolByte(type is KeyType);
-                    if (type is KeyType key)
+                    ctx.Writer.WriteBoolByte(type is KeyDataViewType);
+                    if (type is KeyDataViewType key)
                         ctx.Writer.Write(key.Count);
                     ctx.Writer.Write(info.Segments.Length);
                     foreach (var seg in info.Segments)
@@ -981,9 +1009,9 @@ namespace Microsoft.ML.Data
                     if (names.Length > 0)
                     {
                         // Slot names present! Let's add them.
-                        var metadataBuilder = new DataViewSchema.Metadata.Builder();
+                        var metadataBuilder = new DataViewSchema.Annotations.Builder();
                         metadataBuilder.AddSlotNames(names.Length, (ref VBuffer<ReadOnlyMemory<char>> value) => names.CopyTo(ref value));
-                        schemaBuilder.AddColumn(info.Name, info.ColType, metadataBuilder.ToMetadata());
+                        schemaBuilder.AddColumn(info.Name, info.ColType, metadataBuilder.ToAnnotations());
                     }
                     else
                         // Slot names is empty.
@@ -1063,32 +1091,8 @@ namespace Microsoft.ML.Data
         /// Loads a text file into an <see cref="IDataView"/>. Supports basic mapping from input columns to IDataView columns.
         /// </summary>
         /// <param name="env">The environment to use.</param>
-        /// <param name="columns">Defines a mapping between input columns in the file and IDataView columns.</param>
-        /// <param name="separatorChar"> The character used as separator between data points in a row. By default the tab character is used as separator.</param>
-        /// <param name="hasHeader">Whether the file has a header.</param>
-        /// <param name="allowSparse">Whether the file can contain numerical vectors in sparse format.</param>
-        /// <param name="allowQuoting">Whether the content of a column can be parsed from a string starting and ending with quote.</param>
-        /// <param name="dataSample">Allows to expose items that can be used for reading.</param>
-        internal TextLoader(IHostEnvironment env, Column[] columns, char separatorChar = Defaults.Separator,
-            bool hasHeader = Defaults.HasHeader, bool allowSparse = Defaults.AllowSparse,
-            bool allowQuoting = Defaults.AllowQuoting, IMultiStreamSource dataSample = null)
-            : this(env, MakeArgs(columns, hasHeader, new[] { separatorChar }, allowSparse, allowQuoting), dataSample)
-        {
-        }
-
-        private static Options MakeArgs(Column[] columns, bool hasHeader, char[] separatorChars, bool allowSparse, bool allowQuoting)
-        {
-            Contracts.AssertValue(separatorChars);
-            var result = new Options { Columns = columns, HasHeader = hasHeader, Separators = separatorChars, AllowSparse = allowSparse, AllowQuoting = allowQuoting };
-            return result;
-        }
-
-        /// <summary>
-        /// Loads a text file into an <see cref="IDataView"/>. Supports basic mapping from input columns to IDataView columns.
-        /// </summary>
-        /// <param name="env">The environment to use.</param>
         /// <param name="options">Defines the settings of the load operation.</param>
-        /// <param name="dataSample">Allows to expose items that can be used for reading.</param>
+        /// <param name="dataSample">Allows to expose items that can be used for loading.</param>
         internal TextLoader(IHostEnvironment env, Options options = null, IMultiStreamSource dataSample = null)
         {
             options = options ?? new Options();
@@ -1188,31 +1192,31 @@ namespace Microsoft.ML.Data
         {
             switch (sep)
             {
-                case "space":
-                case " ":
-                    return ' ';
-                case "tab":
-                case "\t":
-                    return '\t';
-                case "comma":
-                case ",":
-                    return ',';
-                case "colon":
-                case ":":
-                    _host.CheckUserArg((_flags & OptionFlags.AllowSparse) == 0, nameof(Options.Separator),
-                        "When the separator is colon, turn off allowSparse");
-                    return ':';
-                case "semicolon":
-                case ";":
-                    return ';';
-                case "bar":
-                case "|":
-                    return '|';
-                default:
-                    char ch = sep[0];
-                    if (sep.Length != 1 || ch < ' ' || '0' <= ch && ch <= '9' || ch == '"')
-                        throw _host.ExceptUserArg(nameof(Options.Separator), "Illegal separator: '{0}'", sep);
-                    return sep[0];
+            case "space":
+            case " ":
+                return ' ';
+            case "tab":
+            case "\t":
+                return '\t';
+            case "comma":
+            case ",":
+                return ',';
+            case "colon":
+            case ":":
+                _host.CheckUserArg((_flags & OptionFlags.AllowSparse) == 0, nameof(Options.Separator),
+                    "When the separator is colon, turn off allowSparse");
+                return ':';
+            case "semicolon":
+            case ";":
+                return ';';
+            case "bar":
+            case "|":
+                return '|';
+            default:
+                char ch = sep[0];
+                if (sep.Length != 1 || ch < ' ' || '0' <= ch && ch <= '9' || ch == '"')
+                    throw _host.ExceptUserArg(nameof(Options.Separator), "Illegal separator: '{0}'", sep);
+                return sep[0];
             }
         }
 
@@ -1222,7 +1226,7 @@ namespace Microsoft.ML.Data
         {
 #pragma warning disable 649 // never assigned
             [Argument(ArgumentType.Multiple, SignatureType = typeof(SignatureDataLoader))]
-            public IComponentFactory<IDataLoader> Loader;
+            public IComponentFactory<ILegacyDataLoader> Loader;
 #pragma warning restore 649 // never assigned
         }
 
@@ -1284,12 +1288,9 @@ namespace Microsoft.ML.Data
                 ch.Assert(h.Loader == null || h.Loader is ICommandLineComponentFactory);
                 var loader = h.Loader as ICommandLineComponentFactory;
 
-                if (loader == null || string.IsNullOrWhiteSpace(loader.Name))
-                    goto LDone;
-
-                // Make sure the loader binds to us.
-                var info = host.ComponentCatalog.GetLoadableClassInfo<SignatureDataLoader>(loader.Name);
-                if (info.Type != typeof(IDataLoader) || info.ArgType != typeof(Options))
+                // Make sure that the schema is described using either the syntax TextLoader{<settings>} or the syntax Text{<settings>},
+                // where "settings" is a string that can be parsed by CmdParser into an object of type TextLoader.Options.
+                if (loader == null || string.IsNullOrWhiteSpace(loader.Name) || (loader.Name != LoaderSignature && loader.Name != "Text"))
                     goto LDone;
 
                 var optionsNew = new Options();
@@ -1309,7 +1310,7 @@ namespace Microsoft.ML.Data
                 error = false;
                 options = optionsNew;
 
-            LDone:
+                LDone:
                 return !error;
             }
         }
@@ -1386,16 +1387,16 @@ namespace Microsoft.ML.Data
         }
 
         // These are legacy constructors needed for ComponentCatalog.
-        internal static IDataLoader Create(IHostEnvironment env, ModelLoadContext ctx, IMultiStreamSource files)
-            => (IDataLoader)Create(env, ctx).Read(files);
-        internal static IDataLoader Create(IHostEnvironment env, Options options, IMultiStreamSource files)
-            => (IDataLoader)new TextLoader(env, options, files).Read(files);
+        internal static ILegacyDataLoader Create(IHostEnvironment env, ModelLoadContext ctx, IMultiStreamSource files)
+            => (ILegacyDataLoader)Create(env, ctx).Load(files);
+        internal static ILegacyDataLoader Create(IHostEnvironment env, Options options, IMultiStreamSource files)
+            => (ILegacyDataLoader)new TextLoader(env, options, files).Load(files);
 
         /// <summary>
-        /// Convenience method to create a <see cref="TextLoader"/> and use it to read a specified file.
+        /// Convenience method to create a <see cref="TextLoader"/> and use it to load a specified file.
         /// </summary>
-        internal static IDataView ReadFile(IHostEnvironment env, Options options, IMultiStreamSource fileSource)
-            => new TextLoader(env, options, fileSource).Read(fileSource);
+        internal static IDataView LoadFile(IHostEnvironment env, Options options, IMultiStreamSource fileSource)
+            => new TextLoader(env, options, fileSource).Load(fileSource);
 
         void ICanSaveModel.Save(ModelSaveContext ctx)
         {
@@ -1423,22 +1424,30 @@ namespace Microsoft.ML.Data
         }
 
         /// <summary>
-        /// The output <see cref="DataViewSchema"/> that will be produced by the reader.
+        /// The output <see cref="DataViewSchema"/> that will be produced by the loader.
         /// </summary>
         public DataViewSchema GetOutputSchema() => _bindings.OutputSchema;
 
         /// <summary>
-        /// Reads data from <paramref name="source"/> into an <see cref="IDataView"/>.
+        /// Loads data from <paramref name="source"/> into an <see cref="IDataView"/>.
         /// </summary>
         /// <param name="source">The source from which to load data.</param>
-        public IDataView Read(IMultiStreamSource source) => new BoundLoader(this, source);
+        /// <example>
+        /// <format type="text/markdown">
+        /// <![CDATA[
+        /// [!code-csharp[Load](~/../docs/samples/docs/samples/Microsoft.ML.Samples/Dynamic/DataOperations/LoadingText.cs)]
+        /// ]]>
+        /// </format>
+        /// </example>
+        public IDataView Load(IMultiStreamSource source) => new BoundLoader(this, source);
 
-        internal static TextLoader CreateTextReader<TInput>(IHostEnvironment host,
+        internal static TextLoader CreateTextLoader<TInput>(IHostEnvironment host,
            bool hasHeader = Defaults.HasHeader,
            char separator = Defaults.Separator,
-           bool allowQuotedStrings = Defaults.AllowQuoting,
+           bool allowQuoting = Defaults.AllowQuoting,
            bool supportSparse = Defaults.AllowSparse,
-           bool trimWhitespace = Defaults.TrimWhitespace)
+           bool trimWhitespace = Defaults.TrimWhitespace,
+           IMultiStreamSource dataSample = null)
         {
             var userType = typeof(TInput);
 
@@ -1447,9 +1456,12 @@ namespace Microsoft.ML.Data
             var propertyInfos =
                 userType
                 .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .Where(x => x.CanRead && x.CanWrite && x.GetGetMethod() != null && x.GetSetMethod() != null && x.GetIndexParameters().Length == 0);
+                .Where(x => x.CanRead && x.GetGetMethod() != null && x.GetIndexParameters().Length == 0);
 
             var memberInfos = (fieldInfos as IEnumerable<MemberInfo>).Concat(propertyInfos).ToArray();
+
+            if (memberInfos.Length == 0)
+                throw host.ExceptParam(nameof(TInput), $"Should define at least one public, readable field or property in {nameof(TInput)}.");
 
             var columns = new List<Column>();
 
@@ -1458,30 +1470,31 @@ namespace Microsoft.ML.Data
                 var memberInfo = memberInfos[index];
                 var mappingAttr = memberInfo.GetCustomAttribute<LoadColumnAttribute>();
 
-                host.Assert(mappingAttr != null, $"Field or property {memberInfo.Name} is missing the {nameof(LoadColumnAttribute)} attribute");
+                if (mappingAttr == null)
+                    throw host.Except($"{(memberInfo is FieldInfo ? "Field" : "Property")} '{memberInfo.Name}' is missing the {nameof(LoadColumnAttribute)} attribute");
 
                 var mappingAttrName = memberInfo.GetCustomAttribute<ColumnNameAttribute>();
 
                 var column = new Column();
                 column.Name = mappingAttrName?.Name ?? memberInfo.Name;
                 column.Source = mappingAttr.Sources.ToArray();
-                DataKind dk;
+                InternalDataKind dk;
                 switch (memberInfo)
                 {
-                    case FieldInfo field:
-                        if (!DataKindExtensions.TryGetDataKind(field.FieldType.IsArray ? field.FieldType.GetElementType() : field.FieldType, out dk))
-                            throw Contracts.Except($"Field {memberInfo.Name} is of unsupported type.");
+                case FieldInfo field:
+                    if (!InternalDataKindExtensions.TryGetDataKind(field.FieldType.IsArray ? field.FieldType.GetElementType() : field.FieldType, out dk))
+                        throw Contracts.Except($"Field {memberInfo.Name} is of unsupported type.");
 
-                        break;
+                    break;
 
-                    case PropertyInfo property:
-                        if (!DataKindExtensions.TryGetDataKind(property.PropertyType.IsArray ? property.PropertyType.GetElementType() : property.PropertyType, out dk))
-                            throw Contracts.Except($"Property {memberInfo.Name} is of unsupported type.");
-                        break;
+                case PropertyInfo property:
+                    if (!InternalDataKindExtensions.TryGetDataKind(property.PropertyType.IsArray ? property.PropertyType.GetElementType() : property.PropertyType, out dk))
+                        throw Contracts.Except($"Property {memberInfo.Name} is of unsupported type.");
+                    break;
 
-                    default:
-                        Contracts.Assert(false);
-                        throw Contracts.ExceptNotSupp("Expected a FieldInfo or a PropertyInfo");
+                default:
+                    Contracts.Assert(false);
+                    throw Contracts.ExceptNotSupp("Expected a FieldInfo or a PropertyInfo");
                 }
 
                 column.Type = dk;
@@ -1493,25 +1506,25 @@ namespace Microsoft.ML.Data
             {
                 HasHeader = hasHeader,
                 Separators = new[] { separator },
-                AllowQuoting = allowQuotedStrings,
+                AllowQuoting = allowQuoting,
                 AllowSparse = supportSparse,
                 TrimWhitespace = trimWhitespace,
                 Columns = columns.ToArray()
             };
 
-            return new TextLoader(host, options);
+            return new TextLoader(host, options, dataSample: dataSample);
         }
 
-        private sealed class BoundLoader : IDataLoader
+        private sealed class BoundLoader : ILegacyDataLoader
         {
-            private readonly TextLoader _reader;
+            private readonly TextLoader _loader;
             private readonly IHost _host;
             private readonly IMultiStreamSource _files;
 
-            public BoundLoader(TextLoader reader, IMultiStreamSource files)
+            public BoundLoader(TextLoader loader, IMultiStreamSource files)
             {
-                _reader = reader;
-                _host = reader._host.Register(nameof(BoundLoader));
+                _loader = loader;
+                _host = loader._host.Register(nameof(BoundLoader));
                 _files = files;
             }
 
@@ -1525,23 +1538,23 @@ namespace Microsoft.ML.Data
             // REVIEW: Should we try to support shuffling?
             public bool CanShuffle => false;
 
-            public DataViewSchema Schema => _reader._bindings.OutputSchema;
+            public DataViewSchema Schema => _loader._bindings.OutputSchema;
 
             public DataViewRowCursor GetRowCursor(IEnumerable<DataViewSchema.Column> columnsNeeded, Random rand = null)
             {
                 _host.CheckValueOrNull(rand);
-                var active = Utils.BuildArray(_reader._bindings.OutputSchema.Count, columnsNeeded);
-                return Cursor.Create(_reader, _files, active);
+                var active = Utils.BuildArray(_loader._bindings.OutputSchema.Count, columnsNeeded);
+                return Cursor.Create(_loader, _files, active);
             }
 
             public DataViewRowCursor[] GetRowCursorSet(IEnumerable<DataViewSchema.Column> columnsNeeded, int n, Random rand = null)
             {
                 _host.CheckValueOrNull(rand);
-                var active = Utils.BuildArray(_reader._bindings.OutputSchema.Count, columnsNeeded);
-                return Cursor.CreateSet(_reader, _files, active, n);
+                var active = Utils.BuildArray(_loader._bindings.OutputSchema.Count, columnsNeeded);
+                return Cursor.CreateSet(_loader, _files, active, n);
             }
 
-            void ICanSaveModel.Save(ModelSaveContext ctx) => ((ICanSaveModel)_reader).Save(ctx);
+            void ICanSaveModel.Save(ModelSaveContext ctx) => ((ICanSaveModel)_loader).Save(ctx);
         }
     }
 }

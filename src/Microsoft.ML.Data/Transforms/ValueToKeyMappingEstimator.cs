@@ -3,28 +3,64 @@
 // See the LICENSE file in the project root for more information.
 
 using System.Linq;
-using Microsoft.Data.DataView;
 using Microsoft.ML.Data;
+using Microsoft.ML.Runtime;
 
-namespace Microsoft.ML.Transforms.Conversions
+namespace Microsoft.ML.Transforms
 {
-    /// <include file='doc.xml' path='doc/members/member[@name="ValueToKeyMappingEstimator"]/*' />
+
+    /// <summary>
+    /// Estimator for <see cref="ValueToKeyMappingTransformer"/>. Converts input values (words, numbers, etc.) <see cref="KeyDataViewType"/>.
+    /// </summary>
+    /// <remarks>
+    /// <format type="text/markdown"><![CDATA[
+    ///
+    /// ###  Estimator Characteristics
+    /// |  |  |
+    /// | -- | -- |
+    /// | Does this estimator need to look at the data to train its parameters? | Yes |
+    /// | Input column data type | Scalar or vector of numeric, boolean, [text](xref:Microsoft.ML.Data.TextDataViewType), [System.DateTime](xref:System.DateTime) and [key](xref:Microsoft.ML.Data.KeyDataViewType) type. |
+    /// | Output column data type | Scalar or vector of [key](xref:Microsoft.ML.Data.KeyDataViewType) type. |
+    ///
+    /// The ValueToKeyMappingEstimator builds up term vocabularies(dictionaries) mapping the input values to the keys on the dictionary.
+    /// If multiple columns are used, each column builds/uses exactly one vocabulary.
+    /// The output columns are KeyDataViewType-valued.
+    /// The Key value is the one-based index of the item in the dictionary.
+    /// If the key is not found in the dictionary, it is assigned the missing value indicator.
+    /// This dictionary mapping values to keys is most commonly learnt from the unique values in input data,
+    /// but can be defined through other means: either with the mapping defined, or as loaded from an external file.
+    ///
+    /// Check the See Also section for links to usage examples.
+    /// ]]></format>
+    /// </remarks>
+    /// <seealso cref="ConversionsExtensionsCatalog.MapValueToKey(TransformsCatalog.ConversionTransforms, InputOutputColumnPair[], int, KeyOrdinality, bool, IDataView)"/>
+    /// <seealso cref="ConversionsExtensionsCatalog.MapValueToKey(TransformsCatalog.ConversionTransforms, string, string, int, KeyOrdinality, bool, IDataView)"/>
+    /// <seealso cref="ConversionsExtensionsCatalog.MapValueToKey(TransformsCatalog.ConversionTransforms, InputOutputColumnPair[], int, ValueToKeyMappingEstimator.KeyOrdinality, bool, IDataView)"/>
+    /// <seealso cref="ConversionsExtensionsCatalog.MapValueToKey(TransformsCatalog.ConversionTransforms, string, string, int, ValueToKeyMappingEstimator.KeyOrdinality, bool, IDataView)"/>
     public sealed class ValueToKeyMappingEstimator : IEstimator<ValueToKeyMappingTransformer>
     {
         [BestFriend]
         internal static class Defaults
         {
-            public const int MaxNumKeys = 1000000;
-            public const SortOrder Sort = SortOrder.Occurrence;
+            public const int MaximumNumberOfKeys = 1000000;
+            public const KeyOrdinality Ordinality = KeyOrdinality.ByOccurrence;
+            public const bool AddKeyValueAnnotationsAsText = false;
         }
 
         /// <summary>
         /// Controls how the order of the output keys.
         /// </summary>
-        public enum SortOrder : byte
+        public enum KeyOrdinality : byte
         {
-            Occurrence = 0,
-            Value = 1,
+            /// <summary>
+            /// Values will be assigned keys in the order in which they appear.
+            /// </summary>
+            ByOccurrence = 0,
+
+            /// <summary>
+            /// Values will be assigned keys according to their sort via an ordinal comparison for the type.
+            /// </summary>
+            ByValue = 1,
             // REVIEW: We can think about having a frequency order option. What about
             // other things, like case insensitive (where appropriate), culturally aware, etc.?
         }
@@ -32,46 +68,60 @@ namespace Microsoft.ML.Transforms.Conversions
         /// <summary>
         /// Describes how the transformer handles one column pair.
         /// </summary>
-        public class ColumnInfo
+        [BestFriend]
+        internal abstract class ColumnOptionsBase
         {
             public readonly string OutputColumnName;
             public readonly string InputColumnName;
-            public readonly SortOrder Sort;
-            public readonly int MaxNumKeys;
-            public readonly string[] Term;
-            public readonly bool TextKeyValues;
+            public readonly KeyOrdinality KeyOrdinality;
+            public readonly int MaximumNumberOfKeys;
+            public readonly bool AddKeyValueAnnotationsAsText;
 
-            protected internal string Terms { get; set; }
+            [BestFriend]
+            internal string[] Keys { get; set; }
 
-            /// <summary>
-            /// Describes how the transformer handles one column pair.
-            /// </summary>
-            /// <param name="outputColumnName">Name of the column resulting from the transformation of <paramref name="inputColumnName"/>.</param>
-            /// <param name="inputColumnName">Name of the column to transform. If set to <see langword="null"/>, the value of the <paramref name="outputColumnName"/> will be used as source.</param>
-            /// <param name="maxNumKeys">Maximum number of keys to keep per column when auto-training.</param>
-            /// <param name="sort">How items should be ordered when vectorized. If <see cref="SortOrder.Occurrence"/> choosen they will be in the order encountered.
-            /// If <see cref="SortOrder.Value"/>, items are sorted according to their default comparison, for example, text sorting will be case sensitive (for example, 'A' then 'Z' then 'a').</param>
-            /// <param name="term">List of terms.</param>
-            /// <param name="textKeyValues">Whether key value metadata should be text, regardless of the actual input type.</param>
-            public ColumnInfo(string outputColumnName, string inputColumnName = null,
-                int maxNumKeys = Defaults.MaxNumKeys,
-                SortOrder sort = Defaults.Sort,
-                string[] term = null,
-                bool textKeyValues = false
-                )
+            [BestFriend]
+            internal string Key { get; set; }
+
+            [BestFriend]
+            private protected ColumnOptionsBase(string outputColumnName, string inputColumnName,
+                int maximumNumberOfKeys, KeyOrdinality keyOrdinality, bool addKeyValueAnnotationsAsText)
             {
                 Contracts.CheckNonWhiteSpace(outputColumnName, nameof(outputColumnName));
                 OutputColumnName = outputColumnName;
                 InputColumnName = inputColumnName ?? outputColumnName;
-                Sort = sort;
-                MaxNumKeys = maxNumKeys;
-                Term = term;
-                TextKeyValues = textKeyValues;
+                KeyOrdinality = keyOrdinality;
+                MaximumNumberOfKeys = maximumNumberOfKeys;
+                AddKeyValueAnnotationsAsText = addKeyValueAnnotationsAsText;
+            }
+        }
+
+        /// <summary>
+        /// Describes how the transformer handles one column pair.
+        /// </summary>
+        [BestFriend]
+        internal sealed class ColumnOptions : ColumnOptionsBase
+        {
+            /// <summary>
+            /// Describes how the transformer handles column pairs.
+            /// </summary>
+            /// <param name="outputColumnName">Name of the column resulting from the transformation of <paramref name="inputColumnName"/>.</param>
+            /// <param name="inputColumnName">Name of the column to transform. If set to <see langword="null"/>, the value of the <paramref name="outputColumnName"/> will be used as source.</param>
+            /// <param name="maximumNumberOfKeys">Maximum number of keys to keep per column when auto-training.</param>
+            /// <param name="keyOrdinality">How items should be ordered when vectorized. If <see cref="KeyOrdinality.ByOccurrence"/> choosen they will be in the order encountered.
+            /// If <see cref="KeyOrdinality.ByValue"/>, items are sorted according to their default comparison, for example, text sorting will be case sensitive (for example, 'A' then 'Z' then 'a').</param>
+            /// <param name="addKeyValueAnnotationsAsText">Whether key value annotations should be text, regardless of the actual input type.</param>
+            public ColumnOptions(string outputColumnName, string inputColumnName = null,
+                int maximumNumberOfKeys = Defaults.MaximumNumberOfKeys,
+                KeyOrdinality keyOrdinality = Defaults.Ordinality,
+                bool addKeyValueAnnotationsAsText = false)
+                : base(outputColumnName, inputColumnName, maximumNumberOfKeys, keyOrdinality, addKeyValueAnnotationsAsText)
+            {
             }
         }
 
         private readonly IHost _host;
-        private readonly ColumnInfo[] _columns;
+        private readonly ColumnOptionsBase[] _columns;
         private readonly IDataView _keyData;
 
         /// <summary>
@@ -80,15 +130,15 @@ namespace Microsoft.ML.Transforms.Conversions
         /// <param name="env">Host Environment.</param>
         /// <param name="outputColumnName">Name of the column resulting from the transformation of <paramref name="inputColumnName"/>.</param>
         /// <param name="inputColumnName">Name of the column to transform. If set to <see langword="null"/>, the value of the <paramref name="outputColumnName"/> will be used as source.</param>
-        /// <param name="maxNumKeys">Maximum number of keys to keep per column when auto-training.</param>
-        /// <param name="sort">How items should be ordered when vectorized. If <see cref="SortOrder.Occurrence"/> choosen they will be in the order encountered.
-        /// If <see cref="SortOrder.Value"/>, items are sorted according to their default comparison, for example, text sorting will be case sensitive (for example, 'A' then 'Z' then 'a').</param>
-        internal ValueToKeyMappingEstimator(IHostEnvironment env, string outputColumnName, string inputColumnName = null, int maxNumKeys = Defaults.MaxNumKeys, SortOrder sort = Defaults.Sort) :
-           this(env, new [] { new ColumnInfo(outputColumnName, inputColumnName ?? outputColumnName, maxNumKeys, sort) })
+        /// <param name="maximumNumberOfKeys">Maximum number of keys to keep per column when auto-training.</param>
+        /// <param name="keyOrdinality">How items should be ordered when vectorized. If <see cref="KeyOrdinality.ByOccurrence"/> choosen they will be in the order encountered.
+        /// If <see cref="KeyOrdinality.ByValue"/>, items are sorted according to their default comparison, for example, text sorting will be case sensitive (for example, 'A' then 'Z' then 'a').</param>
+        internal ValueToKeyMappingEstimator(IHostEnvironment env, string outputColumnName, string inputColumnName = null, int maximumNumberOfKeys = Defaults.MaximumNumberOfKeys, KeyOrdinality keyOrdinality = Defaults.Ordinality) :
+           this(env, new [] { new ColumnOptions(outputColumnName, inputColumnName ?? outputColumnName, maximumNumberOfKeys, keyOrdinality) })
         {
         }
 
-        internal ValueToKeyMappingEstimator(IHostEnvironment env, ColumnInfo[] columns, IDataView keyData = null)
+        internal ValueToKeyMappingEstimator(IHostEnvironment env, ColumnOptionsBase[] columns, IDataView keyData = null)
         {
             Contracts.CheckValue(env, nameof(env));
             _host = env.Register(nameof(ValueToKeyMappingEstimator));
@@ -129,14 +179,14 @@ namespace Microsoft.ML.Transforms.Conversions
 
                 // In the event that we are transforming something that is of type key, we will get their type of key value
                 // metadata, unless it has none or is not vector in which case we back off to having key values over the item type.
-                if (!col.IsKey || !col.Metadata.TryFindColumn(MetadataUtils.Kinds.KeyValues, out var kv) || kv.Kind != SchemaShape.Column.VectorKind.Vector)
+                if (!col.IsKey || !col.Annotations.TryFindColumn(AnnotationUtils.Kinds.KeyValues, out var kv) || kv.Kind != SchemaShape.Column.VectorKind.Vector)
                 {
-                    kv = new SchemaShape.Column(MetadataUtils.Kinds.KeyValues, SchemaShape.Column.VectorKind.Vector,
-                        colInfo.TextKeyValues ? TextDataViewType.Instance : col.ItemType, col.IsKey);
+                    kv = new SchemaShape.Column(AnnotationUtils.Kinds.KeyValues, SchemaShape.Column.VectorKind.Vector,
+                        colInfo.AddKeyValueAnnotationsAsText ? TextDataViewType.Instance : col.ItemType, col.IsKey);
                 }
                 Contracts.Assert(kv.IsValid);
 
-                if (col.Metadata.TryFindColumn(MetadataUtils.Kinds.SlotNames, out var slotMeta))
+                if (col.Annotations.TryFindColumn(AnnotationUtils.Kinds.SlotNames, out var slotMeta))
                     metadata = new SchemaShape(new[] { slotMeta, kv });
                 else
                     metadata = new SchemaShape(new[] { kv });
@@ -145,18 +195,5 @@ namespace Microsoft.ML.Transforms.Conversions
 
             return new SchemaShape(result.Values);
         }
-    }
-
-    public enum KeyValueOrder : byte
-    {
-        /// <summary>
-        /// Terms will be assigned ID in the order in which they appear.
-        /// </summary>
-        Occurence = ValueToKeyMappingEstimator.SortOrder.Occurrence,
-
-        /// <summary>
-        /// Terms will be assigned ID according to their sort via an ordinal comparison for the type.
-        /// </summary>
-        Value = ValueToKeyMappingEstimator.SortOrder.Value
     }
 }

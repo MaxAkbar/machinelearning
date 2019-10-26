@@ -2,7 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using Microsoft.Data.DataView;
 using Microsoft.ML.Data;
 using Microsoft.ML.Functional.Tests.Datasets;
 using Microsoft.ML.RunTests;
@@ -26,24 +25,52 @@ namespace Microsoft.ML.Functional.Tests
         /// <summary>
         /// GlobalFeatureImportance: PFI can be used to compute global feature importance.
         /// </summary>
-        [Fact]
-        public void GlobalFeatureImportanceWithPermutationFeatureImportance()
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void GlobalFeatureImportanceWithPermutationFeatureImportance(bool saveModel)
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
             // Get the dataset
-            var data = mlContext.Data.ReadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
+            var data = mlContext.Data.LoadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
 
             // Create a pipeline to train on the housing data.
             var pipeline = mlContext.Transforms.Concatenate("Features", HousingRegression.Features)
-                .Append(mlContext.Regression.Trainers.StochasticDualCoordinateAscent());
+                .Append(mlContext.Regression.Trainers.Sdca());
 
-            // Fit the pipeline and transform the data.
+            // Fit the pipeline
             var model = pipeline.Fit(data);
-            var transformedData = model.Transform(data);
+
+            IDataView transformedData;
+            RegressionPredictionTransformer<LinearRegressionModelParameters> linearPredictor;
+
+            if(saveModel)
+            {
+                ITransformer loadedModel;
+
+                // Load and save the model
+                var modelAndSchemaPath = GetOutputPath("TestFunctionalTestPFI.zip");
+                mlContext.Model.Save(model, data.Schema, modelAndSchemaPath);
+                loadedModel = mlContext.Model.Load(modelAndSchemaPath, out var schema);
+
+                // Transform the data
+                transformedData = loadedModel.Transform(data);
+
+                // Extract linear predictor
+                linearPredictor = (loadedModel as TransformerChain<ITransformer>).LastTransformer as RegressionPredictionTransformer<LinearRegressionModelParameters>;
+            }
+            else
+            {
+                // Transform the data
+                transformedData = model.Transform(data);
+
+                // Extract linear predictor
+                linearPredictor = model.LastTransformer;
+            }
 
             // Compute the permutation feature importance to look at global feature importance.
-            var permutationMetrics = mlContext.Regression.PermutationFeatureImportance(model.LastTransformer, transformedData);
+            var permutationMetrics = mlContext.Regression.PermutationFeatureImportance(linearPredictor, transformedData);
 
             // Make sure the correct number of features came back.
             Assert.Equal(HousingRegression.Features.Length, permutationMetrics.Length);
@@ -61,14 +88,14 @@ namespace Microsoft.ML.Functional.Tests
         [Fact]
         public void GlobalFeatureImportanceForLinearModelThroughWeights()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
             // Get the dataset.
-            var data = mlContext.Data.ReadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
+            var data = mlContext.Data.LoadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
 
             // Create a pipeline to train on the housing data.
             var pipeline = mlContext.Transforms.Concatenate("Features", HousingRegression.Features)
-                .Append(mlContext.Regression.Trainers.StochasticDualCoordinateAscent());
+                .Append(mlContext.Regression.Trainers.Sdca());
 
             // Fit the pipeline and transform the data.
             var model = pipeline.Fit(data);
@@ -85,10 +112,10 @@ namespace Microsoft.ML.Functional.Tests
         [Fact]
         public void GlobalFeatureImportanceForFastTreeThroughFeatureGain()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
             // Get the dataset
-            var data = mlContext.Data.ReadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
+            var data = mlContext.Data.LoadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
 
             // Create a pipeline to train on the housing data.
             var pipeline = mlContext.Transforms.Concatenate("Features", HousingRegression.Features)
@@ -112,10 +139,10 @@ namespace Microsoft.ML.Functional.Tests
         [Fact]
         public void GlobalFeatureImportanceForFastForestThroughFeatureGain()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
             // Get the dataset
-            var data = mlContext.Data.ReadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
+            var data = mlContext.Data.LoadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
 
             // Create a pipeline to train on the housing data.
             var pipeline = mlContext.Transforms.Concatenate("Features", HousingRegression.Features)
@@ -139,14 +166,14 @@ namespace Microsoft.ML.Functional.Tests
         [Fact]
         public void LocalFeatureImportanceForLinearModel()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
             // Get the dataset
-            var data = mlContext.Data.ReadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
+            var data = mlContext.Data.LoadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
 
             // Create a pipeline to train on the housing data.
             var pipeline = mlContext.Transforms.Concatenate("Features", HousingRegression.Features)
-                .Append(mlContext.Regression.Trainers.StochasticDualCoordinateAscent());
+                .Append(mlContext.Regression.Trainers.Sdca());
 
             // Fit the pipeline and transform the data.
             var model = pipeline.Fit(data);
@@ -154,14 +181,14 @@ namespace Microsoft.ML.Functional.Tests
 
             // Create a Feature Contribution Calculator.
             var predictor = model.LastTransformer;
-            var featureContributions = mlContext.Model.Explainability.FeatureContributionCalculation(predictor.Model, predictor.FeatureColumn, normalize: false);
+            var featureContributions = mlContext.Transforms.CalculateFeatureContribution(predictor, normalize: false);
 
             // Compute the contributions
             var outputData = featureContributions.Fit(scoredData).Transform(scoredData);
 
             // Validate that the contributions are there
             var shuffledSubset = mlContext.Data.TakeRows(mlContext.Data.ShuffleRows(outputData), 10);
-            var scoringEnumerator = mlContext.CreateEnumerable<FeatureContributionOutput>(shuffledSubset, true);
+            var scoringEnumerator = mlContext.Data.CreateEnumerable<FeatureContributionOutput>(shuffledSubset, true);
 
             // Make sure the number of feature contributions returned matches the length of the input feature vector.
             foreach (var row in scoringEnumerator)
@@ -176,10 +203,10 @@ namespace Microsoft.ML.Functional.Tests
         [Fact]
         public void LocalFeatureImportanceForFastTreeModel()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
             // Get the dataset
-            var data = mlContext.Data.ReadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
+            var data = mlContext.Data.LoadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
 
             // Create a pipeline to train on the housing data.
             var pipeline = mlContext.Transforms.Concatenate("Features", HousingRegression.Features)
@@ -191,14 +218,14 @@ namespace Microsoft.ML.Functional.Tests
 
             // Create a Feature Contribution Calculator.
             var predictor = model.LastTransformer;
-            var featureContributions = mlContext.Model.Explainability.FeatureContributionCalculation(predictor.Model, predictor.FeatureColumn, normalize: false);
+            var featureContributions = mlContext.Transforms.CalculateFeatureContribution(predictor, normalize: false);
 
             // Compute the contributions
             var outputData = featureContributions.Fit(scoredData).Transform(scoredData);
 
             // Validate that the contributions are there
             var shuffledSubset = mlContext.Data.TakeRows(mlContext.Data.ShuffleRows(outputData), 10);
-            var scoringEnumerator = mlContext.CreateEnumerable<FeatureContributionOutput>(shuffledSubset, true);
+            var scoringEnumerator = mlContext.Data.CreateEnumerable<FeatureContributionOutput>(shuffledSubset, true);
 
             // Make sure the number of feature contributions returned matches the length of the input feature vector.
             foreach (var row in scoringEnumerator)
@@ -213,10 +240,10 @@ namespace Microsoft.ML.Functional.Tests
         [Fact]
         public void LocalFeatureImportanceForFastForestModel()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
             // Get the dataset
-            var data = mlContext.Data.ReadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
+            var data = mlContext.Data.LoadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
 
             // Create a pipeline to train on the housing data.
             var pipeline = mlContext.Transforms.Concatenate("Features", HousingRegression.Features)
@@ -228,14 +255,14 @@ namespace Microsoft.ML.Functional.Tests
 
             // Create a Feature Contribution Calculator.
             var predictor = model.LastTransformer;
-            var featureContributions = mlContext.Model.Explainability.FeatureContributionCalculation(predictor.Model, predictor.FeatureColumn, normalize: false);
+            var featureContributions = mlContext.Transforms.CalculateFeatureContribution(predictor, normalize: false);
 
             // Compute the contributions
             var outputData = featureContributions.Fit(scoredData).Transform(scoredData);
 
             // Validate that the contributions are there
             var shuffledSubset = mlContext.Data.TakeRows(mlContext.Data.ShuffleRows(outputData), 10);
-            var scoringEnumerator = mlContext.CreateEnumerable<FeatureContributionOutput>(shuffledSubset, true);
+            var scoringEnumerator = mlContext.Data.CreateEnumerable<FeatureContributionOutput>(shuffledSubset, true);
 
             // Make sure the number of feature contributions returned matches the length of the input feature vector.
             foreach (var row in scoringEnumerator)
@@ -251,14 +278,14 @@ namespace Microsoft.ML.Functional.Tests
         [Fact]
         public void LocalFeatureImportanceForGamModel()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
             // Get the dataset
-            var data = mlContext.Data.ReadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
+            var data = mlContext.Data.LoadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
 
             // Create a pipeline to train on the housing data.
             var pipeline = mlContext.Transforms.Concatenate("Features", HousingRegression.Features)
-                .Append(mlContext.Regression.Trainers.GeneralizedAdditiveModels(numIterations: 2));
+                .Append(mlContext.Regression.Trainers.Gam(numberOfIterations: 2));
 
             // Fit the pipeline and transform the data.
             var model = pipeline.Fit(data);
@@ -266,14 +293,14 @@ namespace Microsoft.ML.Functional.Tests
 
             // Create a Feature Contribution Calculator.
             var predictor = model.LastTransformer;
-            var featureContributions = mlContext.Model.Explainability.FeatureContributionCalculation(predictor.Model, predictor.FeatureColumn, normalize: false);
+            var featureContributions = mlContext.Transforms.CalculateFeatureContribution(predictor, normalize: false);
 
             // Compute the contributions
             var outputData = featureContributions.Fit(scoredData).Transform(scoredData);
 
             // Validate that the contributions are there
             var shuffledSubset = mlContext.Data.TakeRows(mlContext.Data.ShuffleRows(outputData), 10);
-            var scoringEnumerator = mlContext.CreateEnumerable<FeatureContributionOutput>(shuffledSubset, true);
+            var scoringEnumerator = mlContext.Data.CreateEnumerable<FeatureContributionOutput>(shuffledSubset, true);
 
             // Make sure the number of feature contributions returned matches the length of the input feature vector.
             foreach (var row in scoringEnumerator)

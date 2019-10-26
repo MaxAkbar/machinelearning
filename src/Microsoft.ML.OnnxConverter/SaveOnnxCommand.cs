@@ -5,7 +5,6 @@
 using System.Collections.Generic;
 using System.IO;
 using Google.Protobuf;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.Command;
 using Microsoft.ML.CommandLine;
@@ -13,8 +12,9 @@ using Microsoft.ML.Data;
 using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Utilities;
 using Microsoft.ML.Model.OnnxConverter;
+using Microsoft.ML.Runtime;
 using Newtonsoft.Json;
-using static Microsoft.ML.UniversalModelFormat.Onnx.OnnxCSharpToProtoWrapper;
+using static Microsoft.ML.Model.OnnxConverter.OnnxCSharpToProtoWrapper;
 
 [assembly: LoadableClass(SaveOnnxCommand.Summary, typeof(SaveOnnxCommand), typeof(SaveOnnxCommand.Arguments), typeof(SignatureCommand),
     "Save ONNX", "SaveOnnx", DocName = "command/SaveOnnx.md")]
@@ -57,8 +57,19 @@ namespace Microsoft.ML.Model.OnnxConverter
             [Argument(ArgumentType.AtMostOnce, Visibility = ArgumentAttribute.VisibilityType.CmdLineOnly, HelpText = "Whether we should attempt to load the predictor and attach the scorer to the pipeline if one is present.", ShortName = "pred", SortOrder = 9)]
             public bool? LoadPredictor;
 
-            [Argument(ArgumentType.Required, Visibility = ArgumentAttribute.VisibilityType.EntryPointsOnly, HelpText = "Model that needs to be converted to ONNX format.", SortOrder = 10)]
+            /// <summary>
+            /// Entry point API can save either <see cref="TransformModel"/> or <see cref="PredictorModel"/>.
+            /// <see cref="Model"/> is used when the saved model is typed to <see cref="TransformModel"/>.
+            /// </summary>
+            [Argument(ArgumentType.AtMostOnce, Visibility = ArgumentAttribute.VisibilityType.EntryPointsOnly, HelpText = "Model that needs to be converted to ONNX format.", SortOrder = 10)]
             public TransformModel Model;
+
+            /// <summary>
+            /// Entry point API can save either <see cref="TransformModel"/> or <see cref="PredictorModel"/>.
+            /// <see cref="PredictiveModel"/> is used when the saved model is typed to <see cref="PredictorModel"/>.
+            /// </summary>
+            [Argument(ArgumentType.AtMostOnce, Visibility = ArgumentAttribute.VisibilityType.EntryPointsOnly, HelpText = "Predictor model that needs to be converted to ONNX format.", SortOrder = 12)]
+            public PredictorModel PredictiveModel;
 
             [Argument(ArgumentType.AtMostOnce, HelpText = "The targeted ONNX version. It can be either \"Stable\" or \"Experimental\". If \"Experimental\" is used, produced model can contain components that is not officially supported in ONNX standard.", SortOrder = 11)]
             public OnnxVersion OnnxVersion;
@@ -72,6 +83,7 @@ namespace Microsoft.ML.Model.OnnxConverter
         private readonly HashSet<string> _inputsToDrop;
         private readonly HashSet<string> _outputsToDrop;
         private readonly TransformModel _model;
+        private readonly PredictorModel _predictiveModel;
         private const string ProducerName = "ML.NET";
         private const long ModelVersion = 0;
 
@@ -96,7 +108,13 @@ namespace Microsoft.ML.Model.OnnxConverter
             _inputsToDrop = CreateDropMap(args.InputsToDropArray ?? args.InputsToDrop?.Split(','));
             _outputsToDrop = CreateDropMap(args.OutputsToDropArray ?? args.OutputsToDrop?.Split(','));
             _domain = args.Domain;
+
+            if (args.Model != null && args.PredictiveModel != null)
+                throw env.Except(nameof(args.Model) + " and " + nameof(args.PredictiveModel) +
+                    " cannot be specified at the same time when calling ONNX converter. Please check the content of " + nameof(args) + ".");
+
             _model = args.Model;
+            _predictiveModel = args.PredictiveModel;
         }
 
         private static HashSet<string> CreateDropMap(string[] toDrop)
@@ -119,7 +137,7 @@ namespace Microsoft.ML.Model.OnnxConverter
         {
             ch.AssertValue(end);
 
-            source = trueEnd = (end as CompositeDataLoader)?.View ?? end;
+            source = trueEnd = (end as LegacyCompositeDataLoader)?.View ?? end;
             IDataTransform transform = source as IDataTransform;
             transforms = new LinkedList<ITransformCanSaveOnnx>();
             while (transform != null)
@@ -141,7 +159,7 @@ namespace Microsoft.ML.Model.OnnxConverter
         }
 
         internal static ModelProto ConvertTransformListToOnnxModel(OnnxContextImpl ctx, IChannel ch, IDataView inputData, IDataView outputData,
-            LinkedList<ITransformCanSaveOnnx> transforms, HashSet<string> inputColumnNamesToDrop=null, HashSet<string> outputColumnNamesToDrop=null)
+            LinkedList<ITransformCanSaveOnnx> transforms, HashSet<string> inputColumnNamesToDrop = null, HashSet<string> outputColumnNamesToDrop = null)
         {
             inputColumnNamesToDrop = inputColumnNamesToDrop ?? new HashSet<string>();
             outputColumnNamesToDrop = outputColumnNamesToDrop ?? new HashSet<string>();
@@ -150,7 +168,7 @@ namespace Microsoft.ML.Model.OnnxConverter
             for (int i = 0; i < inputData.Schema.Count; i++)
             {
                 string colName = inputData.Schema[i].Name;
-                if(inputColumnNamesToDrop.Contains(colName))
+                if (inputColumnNamesToDrop.Contains(colName))
                     continue;
 
                 ctx.AddInputVariable(inputData.Schema[i].Type, colName);
@@ -193,12 +211,12 @@ namespace Microsoft.ML.Model.OnnxConverter
 
         private void Run(IChannel ch)
         {
-            IDataLoader loader = null;
+            ILegacyDataLoader loader = null;
             IPredictor rawPred = null;
             IDataView view;
             RoleMappedSchema trainSchema = null;
 
-            if (_model == null)
+            if (_model == null && _predictiveModel == null)
             {
                 if (string.IsNullOrEmpty(ImplOptions.InputModelFile))
                 {
@@ -213,8 +231,16 @@ namespace Microsoft.ML.Model.OnnxConverter
 
                 view = loader;
             }
-            else
+            else if (_model != null)
+            {
                 view = _model.Apply(Host, new EmptyDataView(Host, _model.InputSchema));
+            }
+            else
+            {
+                view = _predictiveModel.TransformModel.Apply(Host, new EmptyDataView(Host, _predictiveModel.TransformModel.InputSchema));
+                rawPred = _predictiveModel.Predictor;
+                trainSchema = _predictiveModel.GetTrainingSchema(Host);
+            }
 
             // Create the ONNX context for storing global information
             var assembly = System.Reflection.Assembly.GetExecutingAssembly();

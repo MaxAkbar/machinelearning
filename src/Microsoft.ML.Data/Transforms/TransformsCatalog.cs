@@ -1,16 +1,18 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
+using Microsoft.ML.Data;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML
 {
     /// <summary>
-    /// Similar to training context, a transform context is an object serving as a 'catalog' of available transforms.
-    /// Individual transforms are exposed as extension methods of this class or its subclasses.
+    /// Class used by <see cref="MLContext"/> to create instances of transform components.
     /// </summary>
-    public sealed class TransformsCatalog
+    public sealed class TransformsCatalog : IInternalCatalog
     {
-        internal IHostEnvironment Environment { get; }
+        IHostEnvironment IInternalCatalog.Environment => _env;
+        private readonly IHostEnvironment _env;
 
         /// <summary>
         /// The list of operations over categorical data.
@@ -28,11 +30,6 @@ namespace Microsoft.ML
         public TextTransforms Text { get; }
 
         /// <summary>
-        /// The list of operations for data projection.
-        /// </summary>
-        public ProjectionTransforms Projection { get; }
-
-        /// <summary>
         /// The list of operations for selecting features based on some criteria.
         /// </summary>
         public FeatureSelectionTransforms FeatureSelection { get; }
@@ -40,73 +37,67 @@ namespace Microsoft.ML
         internal TransformsCatalog(IHostEnvironment env)
         {
             Contracts.AssertValue(env);
-            Environment = env;
+            _env = env;
 
             Categorical = new CategoricalTransforms(this);
             Conversion = new ConversionTransforms(this);
             Text = new TextTransforms(this);
-            Projection = new ProjectionTransforms(this);
             FeatureSelection = new FeatureSelectionTransforms(this);
         }
 
-        public abstract class SubCatalogBase
-        {
-            internal IHostEnvironment Environment { get; }
-
-            protected SubCatalogBase(TransformsCatalog owner)
-            {
-                Environment = owner.Environment;
-            }
-
-        }
-
         /// <summary>
-        /// The catalog of operations over categorical data.
+        /// Class used by <see cref="MLContext"/> to create instances of categorical data transform components.
         /// </summary>
-        public sealed class CategoricalTransforms : SubCatalogBase
+        public sealed class CategoricalTransforms : IInternalCatalog
         {
-            internal CategoricalTransforms(TransformsCatalog owner) : base(owner)
+            IHostEnvironment IInternalCatalog.Environment => _env;
+            private readonly IHostEnvironment _env;
+
+            internal CategoricalTransforms(TransformsCatalog owner)
             {
+                _env = owner.GetEnvironment();
             }
         }
 
         /// <summary>
-        /// The catalog of type conversion operations.
+        /// Class used by <see cref="MLContext"/> to create instances of type conversion data transform components.
         /// </summary>
-        public sealed class ConversionTransforms : SubCatalogBase
+        public sealed class ConversionTransforms : IInternalCatalog
         {
-            internal ConversionTransforms(TransformsCatalog owner) : base(owner)
+            IHostEnvironment IInternalCatalog.Environment => _env;
+            private readonly IHostEnvironment _env;
+
+            internal ConversionTransforms(TransformsCatalog owner)
             {
+                _env = owner.GetEnvironment();
             }
         }
 
         /// <summary>
-        /// The catalog of text processing operations.
+        /// Class used by <see cref="MLContext"/> to create instances of text data transform components.
         /// </summary>
-        public sealed class TextTransforms : SubCatalogBase
+        public sealed class TextTransforms : IInternalCatalog
         {
-            internal TextTransforms(TransformsCatalog owner) : base(owner)
+            IHostEnvironment IInternalCatalog.Environment => _env;
+            private readonly IHostEnvironment _env;
+
+            internal TextTransforms(TransformsCatalog owner)
             {
+                _env = owner.GetEnvironment();
             }
         }
 
         /// <summary>
-        /// The catalog of projection operations.
+        /// Class used by <see cref="MLContext"/> to create instances of feature selection transform components.
         /// </summary>
-        public sealed class ProjectionTransforms : SubCatalogBase
+        public sealed class FeatureSelectionTransforms : IInternalCatalog
         {
-            internal ProjectionTransforms(TransformsCatalog owner) : base(owner)
-            {
-            }
-        }
+            IHostEnvironment IInternalCatalog.Environment => _env;
+            private readonly IHostEnvironment _env;
 
-        /// <summary>
-        /// The catalog of feature selection operations.
-        /// </summary>
-        public sealed class FeatureSelectionTransforms : SubCatalogBase
-        {
-            internal FeatureSelectionTransforms(TransformsCatalog owner) : base(owner)
+            internal FeatureSelectionTransforms(TransformsCatalog owner)
             {
+                _env = owner.GetEnvironment();
             }
         }
     }

@@ -8,17 +8,15 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
 using Microsoft.ML.Data.IO;
-using Microsoft.ML.EntryPoints;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Model;
 using Microsoft.ML.Model.OnnxConverter;
 using Microsoft.ML.Model.Pfa;
-using Microsoft.ML.Transforms.Conversions;
+using Microsoft.ML.Runtime;
+using Microsoft.ML.Transforms;
 using Newtonsoft.Json.Linq;
 
 [assembly: LoadableClass(ValueToKeyMappingTransformer.Summary, typeof(IDataTransform), typeof(ValueToKeyMappingTransformer),
@@ -34,7 +32,7 @@ using Newtonsoft.Json.Linq;
 [assembly: LoadableClass(typeof(IRowMapper), typeof(ValueToKeyMappingTransformer), null, typeof(SignatureLoadRowMapper),
     ValueToKeyMappingTransformer.UserName, ValueToKeyMappingTransformer.LoaderSignature)]
 
-namespace Microsoft.ML.Transforms.Conversions
+namespace Microsoft.ML.Transforms
 {
     // TermTransform builds up term vocabularies (dictionaries).
     // Notes:
@@ -43,6 +41,9 @@ namespace Microsoft.ML.Transforms.Conversions
     // * The Key value is the one-based index of the item in the dictionary.
     // * Not found is assigned the value zero.
     /// <include file='doc.xml' path='doc/members/member[@name="TextToKey"]/*' />
+    /// <summary>
+    /// <see cref="ITransformer"/> resulting from fitting a <see cref="ValueToKeyMappingEstimator"/>.
+    /// </summary>
     public sealed partial class ValueToKeyMappingTransformer : OneToOneTransformerBase
     {
         [BestFriend]
@@ -59,7 +60,7 @@ namespace Microsoft.ML.Transforms.Conversions
 
             [Argument(ArgumentType.AtMostOnce, HelpText = "How items should be ordered when vectorized. By default, they will be in the order encountered. " +
                 "If by value items are sorted according to their default comparison, for example, text sorting will be case sensitive (for example, 'A' then 'Z' then 'a').")]
-            public ValueToKeyMappingEstimator.SortOrder? Sort;
+            public ValueToKeyMappingEstimator.KeyOrdinality? Sort;
 
             [Argument(ArgumentType.AtMostOnce, HelpText = "Whether key value metadata should be text, regardless of the actual input type", ShortName = "textkv", Hide = true)]
             public bool? TextKeyValues;
@@ -100,10 +101,10 @@ namespace Microsoft.ML.Transforms.Conversions
         }
 
         [BestFriend]
-        internal abstract class ArgumentsBase : TransformInputBase
+        internal abstract class OptionsBase : TransformInputBase
         {
-            [Argument(ArgumentType.AtMostOnce, HelpText = "Maximum number of terms to keep per column when auto-training", ShortName = "max", SortOrder = 5)]
-            public int MaxNumTerms = ValueToKeyMappingEstimator.Defaults.MaxNumKeys;
+            [Argument(ArgumentType.AtMostOnce, HelpText = "Maximum number of keys to keep per column when auto-training", ShortName = "max", SortOrder = 5)]
+            public int MaxNumTerms = ValueToKeyMappingEstimator.Defaults.MaximumNumberOfKeys;
 
             [Argument(ArgumentType.AtMostOnce, HelpText = "Comma separated list of terms", Name = "Terms", SortOrder = 105, Visibility = ArgumentAttribute.VisibilityType.CmdLineOnly)]
             public string Term;
@@ -116,7 +117,7 @@ namespace Microsoft.ML.Transforms.Conversions
 
             [Argument(ArgumentType.Multiple, HelpText = "Data loader", NullName = "<Auto>", SortOrder = 111, Visibility = ArgumentAttribute.VisibilityType.CmdLineOnly, SignatureType = typeof(SignatureDataLoader))]
             [BestFriend]
-            internal IComponentFactory<IMultiStreamSource, IDataLoader> Loader;
+            internal IComponentFactory<IMultiStreamSource, ILegacyDataLoader> Loader;
 
             [Argument(ArgumentType.AtMostOnce, HelpText = "Name of the text column containing the terms", ShortName = "termCol", SortOrder = 112, Visibility = ArgumentAttribute.VisibilityType.CmdLineOnly)]
             public string TermsColumn;
@@ -128,7 +129,7 @@ namespace Microsoft.ML.Transforms.Conversions
             // REVIEW: Should we always sort? Opinions are mixed. See work item 7797429.
             [Argument(ArgumentType.AtMostOnce, HelpText = "How items should be ordered when vectorized. By default, they will be in the order encountered. " +
                 "If by value items are sorted according to their default comparison, for example, text sorting will be case sensitive (for example, 'A' then 'Z' then 'a').", SortOrder = 113)]
-            public ValueToKeyMappingEstimator.SortOrder Sort = ValueToKeyMappingEstimator.Defaults.Sort;
+            public ValueToKeyMappingEstimator.KeyOrdinality Sort = ValueToKeyMappingEstimator.Defaults.Ordinality;
 
             // REVIEW: Should we do this here, or correct the various pieces of code here and in MRS etc. that
             // assume key-values will be string? Once we correct these things perhaps we can see about removing it.
@@ -137,7 +138,7 @@ namespace Microsoft.ML.Transforms.Conversions
         }
 
         [BestFriend]
-        internal sealed class Options : ArgumentsBase
+        internal sealed class Options : OptionsBase
         {
             [Argument(ArgumentType.Multiple, HelpText = "New column definition(s) (optional form: name:src)", Name = "Column", ShortName = "col", SortOrder = 1)]
             public Column[] Columns;
@@ -215,7 +216,7 @@ namespace Microsoft.ML.Transforms.Conversions
         private readonly bool[] _textMetadata;
         private const string RegistrationName = "Term";
 
-        private static (string outputColumnName, string inputColumnName)[] GetColumnPairs(ValueToKeyMappingEstimator.ColumnInfo[] columns)
+        private static (string outputColumnName, string inputColumnName)[] GetColumnPairs(ValueToKeyMappingEstimator.ColumnOptionsBase[] columns)
         {
             Contracts.CheckValue(columns, nameof(columns));
             return columns.Select(x => (x.OutputColumnName, x.InputColumnName)).ToArray();
@@ -223,10 +224,10 @@ namespace Microsoft.ML.Transforms.Conversions
 
         private string TestIsKnownDataKind(DataViewType type)
         {
-            VectorType vectorType = type as VectorType;
+            VectorDataViewType vectorType = type as VectorDataViewType;
             DataViewType itemType = vectorType?.ItemType ?? type;
 
-            if (itemType is KeyType || itemType.IsStandardScalar())
+            if (itemType is KeyDataViewType || itemType.IsStandardScalar())
                 return null;
             return "standard type or a vector of standard type";
         }
@@ -249,12 +250,12 @@ namespace Microsoft.ML.Transforms.Conversions
         }
 
         internal ValueToKeyMappingTransformer(IHostEnvironment env, IDataView input,
-            params ValueToKeyMappingEstimator.ColumnInfo[] columns) :
+            params ValueToKeyMappingEstimator.ColumnOptions[] columns) :
             this(env, input, columns, null, false)
         { }
 
         internal ValueToKeyMappingTransformer(IHostEnvironment env, IDataView input,
-            ValueToKeyMappingEstimator.ColumnInfo[] columns, IDataView keyData, bool autoConvert)
+            ValueToKeyMappingEstimator.ColumnOptionsBase[] columns, IDataView keyData, bool autoConvert)
             : base(Contracts.CheckRef(env, nameof(env)).Register(RegistrationName), GetColumnPairs(columns))
         {
             using (var ch = Host.Start("Training"))
@@ -263,7 +264,7 @@ namespace Microsoft.ML.Transforms.Conversions
                 _unboundMaps = Train(Host, ch, infos, keyData, columns, input, autoConvert);
                 _textMetadata = new bool[_unboundMaps.Length];
                 for (int iinfo = 0; iinfo < columns.Length; ++iinfo)
-                    _textMetadata[iinfo] = columns[iinfo].TextKeyValues;
+                    _textMetadata[iinfo] = columns[iinfo].AddKeyValueAnnotationsAsText;
                 ch.Assert(_unboundMaps.Length == columns.Length);
             }
         }
@@ -277,7 +278,7 @@ namespace Microsoft.ML.Transforms.Conversions
             env.CheckValue(input, nameof(input));
 
             env.CheckValue(options.Columns, nameof(options.Columns));
-            var cols = new ValueToKeyMappingEstimator.ColumnInfo[options.Columns.Length];
+            var cols = new ValueToKeyMappingEstimator.ColumnOptions[options.Columns.Length];
             using (var ch = env.Start("ValidateArgs"))
             {
                 if ((options.Terms != null || !string.IsNullOrEmpty(options.Term)) &&
@@ -286,24 +287,24 @@ namespace Microsoft.ML.Transforms.Conversions
                 {
                     ch.Warning("Explicit term list specified. Data file arguments will be ignored");
                 }
-                if (!Enum.IsDefined(typeof(ValueToKeyMappingEstimator.SortOrder), options.Sort))
+                if (!Enum.IsDefined(typeof(ValueToKeyMappingEstimator.KeyOrdinality), options.Sort))
                     throw ch.ExceptUserArg(nameof(options.Sort), "Undefined sorting criteria '{0}' detected", options.Sort);
 
                 for (int i = 0; i < cols.Length; i++)
                 {
                     var item = options.Columns[i];
                     var sortOrder = item.Sort ?? options.Sort;
-                    if (!Enum.IsDefined(typeof(ValueToKeyMappingEstimator.SortOrder), sortOrder))
+                    if (!Enum.IsDefined(typeof(ValueToKeyMappingEstimator.KeyOrdinality), sortOrder))
                         throw env.ExceptUserArg(nameof(options.Sort), "Undefined sorting criteria '{0}' detected for column '{1}'", sortOrder, item.Name);
 
-                    cols[i] = new ValueToKeyMappingEstimator.ColumnInfo(
+                    cols[i] = new ValueToKeyMappingEstimator.ColumnOptions(
                         item.Name,
                         item.Source ?? item.Name,
                         item.MaxNumTerms ?? options.MaxNumTerms,
                         sortOrder,
-                        item.Terms,
                         item.TextKeyValues ?? options.TextKeyValues);
-                    cols[i].Terms = item.Term ?? options.Term;
+                    cols[i].Keys = item.Terms;
+                    cols[i].Key = item.Term ?? options.Term;
                 };
                 var keyData = GetKeyDataViewOrNull(env, ch, options.DataFile, options.TermsColumn, options.Loader, out bool autoLoaded);
                 return new ValueToKeyMappingTransformer(env, input, cols, keyData, autoLoaded).MakeDataTransform(input);
@@ -375,7 +376,7 @@ namespace Microsoft.ML.Transforms.Conversions
 
         /// <summary>
         /// Returns a single-column <see cref="IDataView"/>, based on values from <see cref="Options"/>,
-        /// in the case where <see cref="ArgumentsBase.DataFile"/> is set. If that is not set, this will
+        /// in the case where <see cref="OptionsBase.DataFile"/> is set. If that is not set, this will
         /// return <see langword="null"/>.
         /// </summary>
         /// <param name="env">The host environment.</param>
@@ -390,7 +391,7 @@ namespace Microsoft.ML.Transforms.Conversions
         /// <returns>The single-column data containing the term data from the file.</returns>
         [BestFriend]
         internal static IDataView GetKeyDataViewOrNull(IHostEnvironment env, IChannel ch,
-            string file, string termsColumn, IComponentFactory<IMultiStreamSource, IDataLoader> loaderFactory,
+            string file, string termsColumn, IComponentFactory<IMultiStreamSource, ILegacyDataLoader> loaderFactory,
             out bool autoConvert)
         {
             ch.AssertValue(env);
@@ -439,10 +440,19 @@ namespace Microsoft.ML.Transforms.Conversions
                             "{0} should not be specified when default loader is " + nameof(TextLoader) + ". Ignoring {0}={1}",
                             nameof(Options.TermsColumn), src);
                     }
-                    keyData = new TextLoader(env,
-                        columns: new[] { new TextLoader.Column("Term", DataKind.TX, 0) },
-                        dataSample: fileSource)
-                        .Read(fileSource);
+
+                    // Create text loader.
+                    var options = new TextLoader.Options()
+                    {
+                        Columns = new[]
+                        {
+                            new TextLoader.Column("Term", DataKind.String, 0)
+                        }
+                    };
+                    var loader = new TextLoader(env, options: options, dataSample: fileSource);
+
+                    keyData = loader.Load(fileSource);
+
                     src = "Term";
                     // In this case they are relying on heuristics, so auto-loading in this case is most appropriate.
                     autoConvert = true;
@@ -493,7 +503,11 @@ namespace Microsoft.ML.Transforms.Conversions
                         e.SetMetric(0, trainer.Count);
                     });
                 while (cursor.MoveNext() && trainer.ProcessRow())
+                {
                     rowCur++;
+                    env.CheckAlive();
+                }
+
                 if (trainer.Count == 0)
                     ch.Warning("Map from the term data resulted in an empty map.");
                 pch.Checkpoint(trainer.Count, rowCur);
@@ -505,7 +519,7 @@ namespace Microsoft.ML.Transforms.Conversions
         /// This builds the <see cref="TermMap"/> instances per column.
         /// </summary>
         private static TermMap[] Train(IHostEnvironment env, IChannel ch, ColInfo[] infos,
-            IDataView keyData, ValueToKeyMappingEstimator.ColumnInfo[] columns, IDataView trainingData, bool autoConvert)
+            IDataView keyData, ValueToKeyMappingEstimator.ColumnOptionsBase[] columns, IDataView trainingData, bool autoConvert)
         {
             Contracts.AssertValue(env);
             env.AssertValue(ch);
@@ -523,14 +537,14 @@ namespace Microsoft.ML.Transforms.Conversions
             for (int iinfo = 0; iinfo < infos.Length; iinfo++)
             {
                 // First check whether we have a terms argument, and handle it appropriately.
-                var terms = columns[iinfo].Terms.AsMemory();
-                var termsArray = columns[iinfo].Term;
+                var terms = columns[iinfo].Key.AsMemory();
+                var termsArray = columns[iinfo].Keys;
 
                 terms = ReadOnlyMemoryUtils.TrimSpaces(terms);
                 if (!terms.IsEmpty || (termsArray != null && termsArray.Length > 0))
                 {
                     // We have terms! Pass it in.
-                    var sortOrder = columns[iinfo].Sort;
+                    var sortOrder = columns[iinfo].KeyOrdinality;
                     var bldr = Builder.Create(infos[iinfo].TypeSrc, sortOrder);
                     if (!terms.IsEmpty)
                         bldr.ParseAddTermArg(ref terms, ch);
@@ -543,7 +557,7 @@ namespace Microsoft.ML.Transforms.Conversions
                     // First column using this file.
                     if (termsFromFile == null)
                     {
-                        var bldr = Builder.Create(infos[iinfo].TypeSrc, columns[iinfo].Sort);
+                        var bldr = Builder.Create(infos[iinfo].TypeSrc, columns[iinfo].KeyOrdinality);
                         termsFromFile = CreateTermMapFromData(env, ch, keyData, autoConvert, bldr);
                     }
                     if (!termsFromFile.ItemType.Equals(infos[iinfo].TypeSrc.GetItemType()))
@@ -561,7 +575,7 @@ namespace Microsoft.ML.Transforms.Conversions
                 else
                 {
                     // Auto train this column. Leave the term map null for now, but set the lim appropriately.
-                    lims[iinfo] = columns[iinfo].MaxNumKeys;
+                    lims[iinfo] = columns[iinfo].MaximumNumberOfKeys;
                     ch.CheckUserArg(lims[iinfo] > 0, nameof(Column.MaxNumTerms), "Must be positive");
                     Contracts.Check(trainingData.Schema.TryGetColumnIndex(infos[iinfo].InputColumnName, out int colIndex));
                     Utils.Add(ref toTrain, colIndex);
@@ -589,7 +603,7 @@ namespace Microsoft.ML.Transforms.Conversions
                     {
                         if (termMap[iinfo] != null)
                             continue;
-                        var bldr = Builder.Create(infos[iinfo].TypeSrc, columns[iinfo].Sort);
+                        var bldr = Builder.Create(infos[iinfo].TypeSrc, columns[iinfo].KeyOrdinality);
                         trainerInfo[itrainer] = iinfo;
                         trainingData.Schema.TryGetColumnIndex(infos[iinfo].InputColumnName, out int colIndex);
                         trainer[itrainer++] = Trainer.Create(cursor, colIndex, false, lims[iinfo], bldr);
@@ -609,6 +623,7 @@ namespace Microsoft.ML.Transforms.Conversions
                     // We might exit early if all trainers reach their maximum.
                     while (tmin < trainer.Length && cursor.MoveNext())
                     {
+                        env.CheckAlive();
                         rowCur++;
                         for (int t = tmin; t < trainer.Length; ++t)
                         {
@@ -711,10 +726,10 @@ namespace Microsoft.ML.Transforms.Conversions
                 for (int i = 0; i < _parent.ColumnPairs.Length; i++)
                 {
                     var type = _infos[i].TypeSrc;
-                    KeyType keyType = _parent._unboundMaps[i].OutputType;
+                    KeyDataViewType keyType = _parent._unboundMaps[i].OutputType;
                     DataViewType colType;
-                    if (type is VectorType vectorType)
-                        colType = new VectorType(keyType, vectorType);
+                    if (type is VectorDataViewType vectorType)
+                        colType = new VectorDataViewType(keyType, vectorType.Dimensions);
                     else
                         colType = keyType;
                     _types[i] = colType;
@@ -733,11 +748,11 @@ namespace Microsoft.ML.Transforms.Conversions
                 {
                     InputSchema.TryGetColumnIndex(_parent.ColumnPairs[i].inputColumnName, out int colIndex);
                     Host.Assert(colIndex >= 0);
-                    var builder = new DataViewSchema.Metadata.Builder();
+                    var builder = new DataViewSchema.Annotations.Builder();
                     _termMap[i].AddMetadata(builder);
 
-                    builder.Add(InputSchema[colIndex].Metadata, name => name == MetadataUtils.Kinds.SlotNames);
-                    result[i] = new DataViewSchema.DetachedColumn(_parent.ColumnPairs[i].outputColumnName, _types[i], builder.ToMetadata());
+                    builder.Add(InputSchema[colIndex].Annotations, name => name == AnnotationUtils.Kinds.SlotNames);
+                    result[i] = new DataViewSchema.DetachedColumn(_parent.ColumnPairs[i].outputColumnName, _types[i], builder.ToAnnotations());
                 }
                 return result;
             }
@@ -831,7 +846,7 @@ namespace Microsoft.ML.Transforms.Conversions
                 Contracts.AssertValue(srcToken);
                 //Contracts.Assert(CanSavePfa);
 
-                VectorType vectorType = info.TypeSrc as VectorType;
+                VectorDataViewType vectorType = info.TypeSrc as VectorDataViewType;
                 DataViewType itemType = vectorType?.ItemType ?? info.TypeSrc;
                 if (!(itemType is TextDataViewType))
                     return null;

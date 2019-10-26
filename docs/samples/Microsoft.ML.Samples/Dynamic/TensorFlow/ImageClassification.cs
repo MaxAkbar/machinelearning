@@ -1,8 +1,13 @@
 using System;
+using System.IO;
 using System.Linq;
+using System.Net;
+using ICSharpCode.SharpZipLib.GZip;
+using ICSharpCode.SharpZipLib.Tar;
+using Microsoft.ML;
 using Microsoft.ML.Data;
 
-namespace Microsoft.ML.Samples.Dynamic.TensorFlow
+namespace Samples.Dynamic
 {
     public static class ImageClassification
     {
@@ -13,32 +18,44 @@ namespace Microsoft.ML.Samples.Dynamic.TensorFlow
         {
             // Download the ResNet 101 model from the location below.
             // https://storage.googleapis.com/download.tensorflow.org/models/tflite_11_05_08/resnet_v2_101.tgz
-            var modelLocation = @"resnet_v2_101/resnet_v2_101_299_frozen.pb";
+
+            string modelLocation = "resnet_v2_101_299_frozen.pb";
+            if (!File.Exists(modelLocation))
+            {
+                modelLocation = Download(@"https://storage.googleapis.com/download.tensorflow.org/models/tflite_11_05_08/resnet_v2_101.tgz", @"resnet_v2_101_299_frozen.tgz");
+                Unzip(Path.Join(Directory.GetCurrentDirectory(), modelLocation),
+                    Directory.GetCurrentDirectory());
+
+                modelLocation = "resnet_v2_101_299_frozen.pb";
+            }
 
             var mlContext = new MLContext();
             var data = GetTensorData();
-            var idv = mlContext.Data.ReadFromEnumerable(data);
+            var idv = mlContext.Data.LoadFromEnumerable(data);
 
             // Create a ML pipeline.
-            var pipeline = mlContext.Transforms.ScoreTensorFlowModel(
-                modelLocation, 
+            var pipeline = mlContext.Model.LoadTensorFlowModel(modelLocation)
+                .ScoreTensorFlowModel(
                 new[] { nameof(OutputScores.output) },
-                new[] { nameof(TensorData.input) });
+                new[] { nameof(TensorData.input) }, addBatchDimensionInput: true);
 
             // Run the pipeline and get the transformed values.
             var estimator = pipeline.Fit(idv);
             var transformedValues = estimator.Transform(idv);
 
             // Retrieve model scores.
-            var outScores = mlContext.CreateEnumerable<OutputScores>(transformedValues, reuseRowObject: false);
+            var outScores = mlContext.Data.CreateEnumerable<OutputScores>(
+                transformedValues, reuseRowObject: false);
 
-            // Display scores. (for the sake of brevity we display scores of the first 3 classes)
+            // Display scores. (for the sake of brevity we display scores of the
+            // first 3 classes)
             foreach (var prediction in outScores)
             {
                 int numClasses = 0;
                 foreach (var classScore in prediction.output.Take(3))
                 {
-                    Console.WriteLine($"Class #{numClasses++} score = {classScore}");
+                    Console.WriteLine(
+                        $"Class #{numClasses++} score = {classScore}");
                 }
                 Console.WriteLine(new string('-', 10));
             }
@@ -61,7 +78,8 @@ namespace Microsoft.ML.Samples.Dynamic.TensorFlow
 
         /// <summary>
         /// A class to hold sample tensor data. 
-        /// Member name should match the inputs that the model expects (in this case, input).
+        /// Member name should match the inputs that the model expects (in this
+        /// case, input).
         /// </summary>
         public class TensorData
         {
@@ -75,9 +93,13 @@ namespace Microsoft.ML.Samples.Dynamic.TensorFlow
         public static TensorData[] GetTensorData()
         {
             // This can be any numerical data. Assume image pixel values.
-            var image1 = Enumerable.Range(0, inputSize).Select(x => (float)x / inputSize).ToArray();
-            var image2 = Enumerable.Range(0, inputSize).Select(x => (float)(x + 10000) / inputSize).ToArray();
-            return new TensorData[] { new TensorData() { input = image1 }, new TensorData() { input = image2 } };
+            var image1 = Enumerable.Range(0, inputSize).Select(
+                x => (float)x / inputSize).ToArray();
+            
+            var image2 = Enumerable.Range(0, inputSize).Select(
+                x => (float)(x + 10000) / inputSize).ToArray();
+            return new TensorData[] { new TensorData() { input = image1 },
+                new TensorData() { input = image2 } };
         }
 
         /// <summary>
@@ -86,6 +108,33 @@ namespace Microsoft.ML.Samples.Dynamic.TensorFlow
         class OutputScores
         {
             public float[] output { get; set; }
+        }
+
+        private static string Download(string baseGitPath, string dataFile)
+        {
+            using (WebClient client = new WebClient())
+            {
+                client.DownloadFile(new Uri($"{baseGitPath}"), dataFile);
+            }
+
+            return dataFile;
+        }
+
+        /// <summary>
+        /// Taken from 
+        /// https://github.com/icsharpcode/SharpZipLib/wiki/GZip-and-Tar-Samples.
+        /// </summary>
+        private static void Unzip(string path, string targetDir)
+        {
+            Stream inStream = File.OpenRead(path);
+            Stream gzipStream = new GZipInputStream(inStream);
+
+            TarArchive tarArchive = TarArchive.CreateInputTarArchive(gzipStream);
+            tarArchive.ExtractContents(targetDir);
+            tarArchive.Close();
+
+            gzipStream.Close();
+            inStream.Close();
         }
     }
 }

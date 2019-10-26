@@ -4,7 +4,7 @@
   <PropertyGroup>
     <TargetFramework>netcoreapp2.1</TargetFramework>
     <TargetFramework Condition="$(Configuration.EndsWith('-netfx'))">net461</TargetFramework>
-    <TargetFramework Condition="'$(UseIntrinsics)' == 'true'">netcoreapp3.0</TargetFramework>
+    <TargetFramework Condition="$(Configuration.EndsWith('-netcoreapp3_0'))">netcoreapp3.0</TargetFramework>
     <RuntimeIdentifier Condition="'$(TargetFramework)' == 'net461'">win-x64</RuntimeIdentifier>
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -35,6 +35,7 @@
 
   <PropertyGroup Condition="'$(Coverage)' == 'true'">
       <CollectCoverage>true</CollectCoverage>
+      <SingleHit>true</SingleHit>
       <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies> <!-- https://github.com/tonerdo/coverlet/issues/72 -->
       <CoverletOutputFormat>opencover</CoverletOutputFormat>
       <CoverletOutput>$(BaseOutputPath)$(PlatformConfig)\coverage\$(MSBuildProjectName).coverage</CoverletOutput>

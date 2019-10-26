@@ -2,13 +2,13 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+using Microsoft.ML.Data;
 using Microsoft.ML.Functional.Tests.Datasets;
 using Microsoft.ML.RunTests;
 using Microsoft.ML.TestFramework;
 using Microsoft.ML.TestFramework.Attributes;
 using Microsoft.ML.Trainers;
 using Microsoft.ML.Trainers.FastTree;
-using Microsoft.ML.Trainers.KMeans;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -26,14 +26,14 @@ namespace Microsoft.ML.Functional.Tests
         [Fact]
         public void TrainAndEvaluateAnomalyDetection()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
             var trainData = MnistOneClass.GetTextLoader(mlContext,
                     TestDatasets.mnistOneClass.fileHasHeader, TestDatasets.mnistOneClass.fileSeparator)
-                .Read(GetDataPath(TestDatasets.mnistOneClass.trainFilename));
+                .Load(GetDataPath(TestDatasets.mnistOneClass.trainFilename));
             var testData = MnistOneClass.GetTextLoader(mlContext,
                     TestDatasets.mnistOneClass.fileHasHeader, TestDatasets.mnistOneClass.fileSeparator)
-                .Read(GetDataPath(TestDatasets.mnistOneClass.testFilename));
+                .Load(GetDataPath(TestDatasets.mnistOneClass.testFilename));
 
             // Create a training pipeline.
             var pipeline = mlContext.AnomalyDetection.Trainers.RandomizedPca();
@@ -56,17 +56,17 @@ namespace Microsoft.ML.Functional.Tests
         [Fact]
         public void TrainAndEvaluateBinaryClassification()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
-            var data = mlContext.Data.ReadFromTextFile<TweetSentiment>(GetDataPath(TestDatasets.Sentiment.trainFilename),
+            var data = mlContext.Data.LoadFromTextFile<TweetSentiment>(GetDataPath(TestDatasets.Sentiment.trainFilename),
                 hasHeader: TestDatasets.Sentiment.fileHasHeader,
                 separatorChar: TestDatasets.Sentiment.fileSeparator);
 
             // Create a training pipeline.
             var pipeline = mlContext.Transforms.Text.FeaturizeText("Features", "SentimentText")
                 .AppendCacheCheckpoint(mlContext)
-                .Append(mlContext.BinaryClassification.Trainers.StochasticDualCoordinateAscentNonCalibrated(
-                    new SdcaNonCalibratedBinaryTrainer.Options { NumThreads = 1 }));
+                .Append(mlContext.BinaryClassification.Trainers.SdcaNonCalibrated(
+                    new SdcaNonCalibratedBinaryTrainer.Options { NumberOfThreads = 1 }));
 
             // Train the model.
             var model = pipeline.Fit(data);
@@ -85,17 +85,17 @@ namespace Microsoft.ML.Functional.Tests
         [Fact]
         public void TrainAndEvaluateBinaryClassificationWithCalibration()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
-            var data = mlContext.Data.ReadFromTextFile<TweetSentiment>(GetDataPath(TestDatasets.Sentiment.trainFilename),
+            var data = mlContext.Data.LoadFromTextFile<TweetSentiment>(GetDataPath(TestDatasets.Sentiment.trainFilename),
                 hasHeader: TestDatasets.Sentiment.fileHasHeader,
                 separatorChar: TestDatasets.Sentiment.fileSeparator);
 
             // Create a training pipeline.
             var pipeline = mlContext.Transforms.Text.FeaturizeText("Features", "SentimentText")
                 .AppendCacheCheckpoint(mlContext)
-                .Append(mlContext.BinaryClassification.Trainers.LogisticRegression(
-                    new LogisticRegression.Options { NumThreads = 1 }));
+                .Append(mlContext.BinaryClassification.Trainers.LbfgsLogisticRegression(
+                    new LbfgsLogisticRegressionBinaryTrainer.Options { NumberOfThreads = 1 }));
 
             // Train the model.
             var model = pipeline.Fit(data);
@@ -114,16 +114,16 @@ namespace Microsoft.ML.Functional.Tests
         [Fact]
         public void TrainAndEvaluateClustering()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
-            var data = mlContext.Data.ReadFromTextFile<Iris>(GetDataPath(TestDatasets.iris.trainFilename),
+            var data = mlContext.Data.LoadFromTextFile<Iris>(GetDataPath(TestDatasets.iris.trainFilename),
                 hasHeader: TestDatasets.iris.fileHasHeader,
                 separatorChar: TestDatasets.iris.fileSeparator);
 
             // Create a training pipeline.
             var pipeline = mlContext.Transforms.Concatenate("Features", Iris.Features)
                 .AppendCacheCheckpoint(mlContext)
-                .Append(mlContext.Clustering.Trainers.KMeans(new KMeansPlusPlusTrainer.Options { NumThreads = 1 }));
+                .Append(mlContext.Clustering.Trainers.KMeans(new KMeansTrainer.Options { NumberOfThreads = 1 }));
 
             // Train the model.
             var model = pipeline.Fit(data);
@@ -142,17 +142,18 @@ namespace Microsoft.ML.Functional.Tests
         [Fact]
         public void TrainAndEvaluateMulticlassClassification()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
-            var data = mlContext.Data.ReadFromTextFile<Iris>(GetDataPath(TestDatasets.iris.trainFilename),
+            var data = mlContext.Data.LoadFromTextFile<Iris>(GetDataPath(TestDatasets.iris.trainFilename),
                 hasHeader: TestDatasets.iris.fileHasHeader,
                 separatorChar: TestDatasets.iris.fileSeparator);
 
             // Create a training pipeline.
             var pipeline = mlContext.Transforms.Concatenate("Features", Iris.Features)
+                .Append(mlContext.Transforms.Conversion.MapValueToKey("Label"))
                 .AppendCacheCheckpoint(mlContext)
-                .Append(mlContext.MulticlassClassification.Trainers.StochasticDualCoordinateAscent(
-                    new SdcaMultiClassTrainer.Options { NumThreads = 1}));
+                .Append(mlContext.MulticlassClassification.Trainers.SdcaMaximumEntropy(
+                    new SdcaMaximumEntropyMulticlassTrainer.Options { NumberOfThreads = 1 }));
 
             // Train the model.
             var model = pipeline.Fit(data);
@@ -165,14 +166,8 @@ namespace Microsoft.ML.Functional.Tests
             Common.AssertMetrics(metrics);
         }
 
-        /// <summary>
-        /// Train and Evaluate: Ranking.
-        /// </summary>
-        [Fact]
-        public void TrainAndEvaluateRanking()
+        private IDataView GetScoredDataForRankingEvaluation(MLContext mlContext)
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
-
             var data = Iris.LoadAsRankingProblem(mlContext,
                 GetDataPath(TestDatasets.iris.trainFilename),
                 hasHeader: TestDatasets.iris.fileHasHeader,
@@ -180,17 +175,48 @@ namespace Microsoft.ML.Functional.Tests
 
             // Create a training pipeline.
             var pipeline = mlContext.Transforms.Concatenate("Features", Iris.Features)
-                .Append(mlContext.Ranking.Trainers.FastTree(new FastTreeRankingTrainer.Options { NumThreads = 1 }));
+                .Append(mlContext.Ranking.Trainers.FastTree(new FastTreeRankingTrainer.Options { NumberOfThreads = 1 }));
 
             // Train the model.
             var model = pipeline.Fit(data);
 
             // Evaluate the model.
             var scoredData = model.Transform(data);
-            var metrics = mlContext.Ranking.Evaluate(scoredData, label: "Label", groupId: "GroupId");
+
+            return scoredData;
+        }
+
+        /// <summary>
+        /// Train and Evaluate: Ranking.
+        /// </summary>
+        [Fact]
+        public void TrainAndEvaluateRanking()
+        {
+            var mlContext = new MLContext(seed: 1);
+
+            var scoredData = GetScoredDataForRankingEvaluation(mlContext);
+            var metrics = mlContext.Ranking.Evaluate(scoredData, labelColumnName: "Label", rowGroupColumnName: "GroupId");
 
             // Check that the metrics returned are valid.
             Common.AssertMetrics(metrics);
+        }
+
+        /// <summary>
+        /// Train and Evaluate: Ranking with options.
+        /// </summary>
+        [Fact]
+        public void TrainAndEvaluateRankingWithOptions()
+        {
+            var mlContext = new MLContext(seed: 1);
+            int[] tlevels = { 50, 150, 100 };
+            var options = new RankingEvaluatorOptions();
+            foreach (int i in tlevels)
+            {
+                options.DcgTruncationLevel = i;
+                var scoredData = GetScoredDataForRankingEvaluation(mlContext);
+                var metrics = mlContext.Ranking.Evaluate(scoredData, options, labelColumnName: "Label", rowGroupColumnName: "GroupId");
+                Common.AssertMetrics(metrics);
+            }
         }
 
         /// <summary>
@@ -199,7 +225,7 @@ namespace Microsoft.ML.Functional.Tests
         [MatrixFactorizationFact]
         public void TrainAndEvaluateRecommendation()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
             // Get the dataset.
             var data = TrivialMatrixFactorization.LoadAndFeaturizeFromTextFile(
@@ -236,19 +262,13 @@ namespace Microsoft.ML.Functional.Tests
         [Fact]
         public void TrainAndEvaluateRegression()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
-            // Get the dataset.
-            var data = mlContext.Data.CreateTextLoader(TestDatasets.housing.GetLoaderColumns(),
-                    hasHeader: TestDatasets.housing.fileHasHeader, separatorChar: TestDatasets.housing.fileSeparator)
-                .Read(GetDataPath(TestDatasets.housing.trainFilename));
-
-            // Create a pipeline to train on the sentiment data.
-            var pipeline = mlContext.Transforms.Concatenate("Features", new string[] {
-                    "CrimesPerCapita", "PercentResidental", "PercentNonRetail", "CharlesRiver", "NitricOxides", "RoomsPerDwelling",
-                    "PercentPre40s", "EmploymentDistance", "HighwayDistance", "TaxRate", "TeacherRatio"})
-                .Append(mlContext.Transforms.CopyColumns("Label", "MedianHomeValue"))
-                .Append(mlContext.Regression.Trainers.FastTree(new FastTreeRegressionTrainer.Options { NumThreads = 1 }));
+            // Get the dataset
+            var data = mlContext.Data.LoadFromTextFile<HousingRegression>(GetDataPath(TestDatasets.housing.trainFilename), hasHeader: true);
+            // Create a pipeline to train on the housing data.
+            var pipeline = mlContext.Transforms.Concatenate("Features", HousingRegression.Features)
+                .Append(mlContext.Regression.Trainers.FastForest(new FastForestRegressionTrainer.Options { NumberOfThreads = 1 }));
 
             // Train the model.
             var model = pipeline.Fit(data);
@@ -270,17 +290,17 @@ namespace Microsoft.ML.Functional.Tests
         [Fact]
         public void TrainAndEvaluateWithPrecisionRecallCurves()
         {
-            var mlContext = new MLContext(seed: 1, conc: 1);
+            var mlContext = new MLContext(seed: 1);
 
-            var data = mlContext.Data.ReadFromTextFile<TweetSentiment>(GetDataPath(TestDatasets.Sentiment.trainFilename),
+            var data = mlContext.Data.LoadFromTextFile<TweetSentiment>(GetDataPath(TestDatasets.Sentiment.trainFilename),
                 hasHeader: TestDatasets.Sentiment.fileHasHeader,
                 separatorChar: TestDatasets.Sentiment.fileSeparator);
 
             // Create a training pipeline.
             var pipeline = mlContext.Transforms.Text.FeaturizeText("Features", "SentimentText")
                 .AppendCacheCheckpoint(mlContext)
-                .Append(mlContext.BinaryClassification.Trainers.LogisticRegression(
-                    new LogisticRegression.Options { NumThreads = 1 }));
+                .Append(mlContext.BinaryClassification.Trainers.LbfgsLogisticRegression(
+                    new LbfgsLogisticRegressionBinaryTrainer.Options { NumberOfThreads = 1 }));
 
             // Train the model.
             var model = pipeline.Fit(data);

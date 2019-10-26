@@ -4,11 +4,13 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Runtime;
 
-namespace Microsoft.ML.Model
+namespace Microsoft.ML
 {
     /// <summary>
     /// For saving a model into a repository.
@@ -303,9 +305,10 @@ namespace Microsoft.ML.Model
             Contracts.CheckValueOrNull(ectx);
             ectx.CheckValue(stream, nameof(stream));
             var rep = new RepositoryWriter(stream, ectx, useFileSystem);
+            var versionInfo = FileVersionInfo.GetVersionInfo(typeof(RepositoryWriter).Assembly.Location);
             using (var ent = rep.CreateEntry(DirTrainingInfo, "Version.txt"))
             using (var writer = Utils.OpenWriter(ent.Stream))
-                writer.WriteLine(typeof(RepositoryWriter).Assembly.GetName().Version);
+                writer.WriteLine(versionInfo.ProductVersion);
             return rep;
         }
 

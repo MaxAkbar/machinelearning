@@ -5,34 +5,52 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
+using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
 using Microsoft.ML.Internal.CpuMath;
 using Microsoft.ML.Internal.Utilities;
-using Microsoft.ML.Model;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Transforms.TimeSeries;
 
-[assembly: LoadableClass(typeof(AdaptiveSingularSpectrumSequenceModeler), typeof(AdaptiveSingularSpectrumSequenceModeler), null, typeof(SignatureLoadModel),
+[assembly: LoadableClass(typeof(AdaptiveSingularSpectrumSequenceModelerInternal),
+    typeof(AdaptiveSingularSpectrumSequenceModelerInternal), null, typeof(SignatureLoadModel),
     "SSA Sequence Modeler",
-    AdaptiveSingularSpectrumSequenceModeler.LoaderSignature)]
+    AdaptiveSingularSpectrumSequenceModelerInternal.LoaderSignature)]
 
 namespace Microsoft.ML.Transforms.TimeSeries
 {
     /// <summary>
+    /// Ranking selection method for the signal.
+    /// </summary>
+    public enum RankSelectionMethod
+    {
+        Fixed,
+        Exact,
+        Fast
+    }
+
+    /// <summary>
+    /// Growth ratio. Defined as Growth^(1/TimeSpan).
+    /// </summary>
+    public struct GrowthRatio
+    {
+        [Argument(ArgumentType.AtMostOnce, HelpText = "Time span of growth ratio. Must be strictly positive.", SortOrder = 1)]
+        public int TimeSpan;
+
+        [Argument(ArgumentType.AtMostOnce, HelpText = "Growth. Must be non-negative.", SortOrder = 2)]
+        public Double Growth;
+
+        public Double Ratio { get { return Math.Pow(Growth, 1d / TimeSpan); } }
+    }
+
+    /// <summary>
     /// This class implements basic Singular Spectrum Analysis (SSA) model for modeling univariate time-series.
     /// For the details of the model, refer to http://arxiv.org/pdf/1206.6910.pdf.
     /// </summary>
-    internal sealed class AdaptiveSingularSpectrumSequenceModeler : SequenceModelerBase<Single, Single>
+    internal sealed class AdaptiveSingularSpectrumSequenceModelerInternal : SequenceModelerBase<Single, Single>
     {
         internal const string LoaderSignature = "SSAModel";
-
-        public enum RankSelectionMethod
-        {
-            Fixed,
-            Exact,
-            Fast
-        }
 
         internal sealed class SsaForecastResult : ForecastResultBase<Single>
         {
@@ -45,49 +63,6 @@ namespace Microsoft.ML.Transforms.TimeSeries
             internal Single BoundOffset;
 
             public bool IsVarianceValid { get { return CanComputeForecastIntervals; } }
-        }
-
-        public struct GrowthRatio
-        {
-            private int _timeSpan;
-            private Double _growth;
-
-            public int TimeSpan
-            {
-                get
-                {
-                    return _timeSpan;
-                }
-                set
-                {
-                    Contracts.CheckParam(value > 0, nameof(TimeSpan), "The time span must be strictly positive.");
-                    _timeSpan = value;
-                }
-            }
-
-            public Double Growth
-            {
-                get
-                {
-                    return _growth;
-                }
-                set
-                {
-                    Contracts.CheckParam(value >= 0, nameof(Growth), "The growth must be non-negative.");
-                    _growth = value;
-                }
-            }
-
-            public GrowthRatio(int timeSpan = 1, double growth = Double.PositiveInfinity)
-            {
-                Contracts.CheckParam(timeSpan > 0, nameof(TimeSpan), "The time span must be strictly positive.");
-                Contracts.CheckParam(growth >= 0, nameof(Growth), "The growth must be non-negative.");
-
-                _growth = growth;
-                _timeSpan = timeSpan;
-            }
-
-            public Double Ratio { get { return Math.Pow(_growth, 1d / _timeSpan); } }
         }
 
         public sealed class ModelInfo
@@ -225,7 +200,7 @@ namespace Microsoft.ML.Transforms.TimeSeries
                 verReadableCur: 0x00010002,
                 verWeCanReadBack: 0x00010001,
                 loaderSignature: LoaderSignature,
-                loaderAssemblyName: typeof(AdaptiveSingularSpectrumSequenceModeler).Assembly.FullName);
+                loaderAssemblyName: typeof(AdaptiveSingularSpectrumSequenceModelerInternal).Assembly.FullName);
         }
 
         private const int VersionSavingStateAndPrediction = 0x00010002;
@@ -245,8 +220,8 @@ namespace Microsoft.ML.Transforms.TimeSeries
         /// <param name="shouldComputeForecastIntervals">The flag determining whether the confidence bounds for the point forecasts should be computed. (default = true)</param>
         /// <param name="shouldstablize">The flag determining whether the model should be stabilized.</param>
         /// <param name="shouldMaintainInfo">The flag determining whether the meta information for the model needs to be maintained.</param>
-        /// <param name="maxGrowth">The maximum growth on the exponential trend</param>
-        public AdaptiveSingularSpectrumSequenceModeler(IHostEnvironment env, int trainSize, int seriesLength, int windowSize, Single discountFactor = 1,
+        /// <param name="maxGrowth">The maximum growth on the exponential trend.</param>
+        public AdaptiveSingularSpectrumSequenceModelerInternal(IHostEnvironment env, int trainSize, int seriesLength, int windowSize, Single discountFactor = 1,
             RankSelectionMethod rankSelectionMethod = RankSelectionMethod.Exact, int? rank = null, int? maxRank = null,
             bool shouldComputeForecastIntervals = true, bool shouldstablize = true, bool shouldMaintainInfo = false, GrowthRatio? maxGrowth = null)
             : base()
@@ -255,8 +230,10 @@ namespace Microsoft.ML.Transforms.TimeSeries
             _host = env.Register(LoaderSignature);
             _host.CheckParam(windowSize >= 2, nameof(windowSize), "The window size should be at least 2."); // ...because otherwise we have nothing to autoregress on
             _host.CheckParam(seriesLength > windowSize, nameof(seriesLength), "The series length should be greater than the window size.");
-            _host.Check(trainSize > 2 * windowSize, "The input series length for training should be greater than twice the window size.");
+            _host.Check(trainSize > 2 * windowSize, "The input size for training should be greater than twice the window size.");
             _host.CheckParam(0 <= discountFactor && discountFactor <= 1, nameof(discountFactor), "The discount factor should be in [0,1].");
+            _host.CheckParam(maxGrowth == null || maxGrowth.Value.TimeSpan > 0, nameof(GrowthRatio.TimeSpan), "The time span must be strictly positive.");
+            _host.CheckParam(maxGrowth == null || maxGrowth.Value.Growth >= 0, nameof(GrowthRatio.Growth), "The growth must be non-negative.");
 
             if (maxRank != null)
             {
@@ -311,7 +288,7 @@ namespace Microsoft.ML.Transforms.TimeSeries
         /// The copy constructor.
         /// </summary>
         /// <param name="model">An object whose contents are copied to the current object.</param>
-        private AdaptiveSingularSpectrumSequenceModeler(AdaptiveSingularSpectrumSequenceModeler model)
+        private AdaptiveSingularSpectrumSequenceModelerInternal(AdaptiveSingularSpectrumSequenceModelerInternal model)
         {
             _host = model._host.Register(LoaderSignature);
             _host.Assert(model._windowSize >= 2);
@@ -354,7 +331,7 @@ namespace Microsoft.ML.Transforms.TimeSeries
             }
         }
 
-        public AdaptiveSingularSpectrumSequenceModeler(IHostEnvironment env, ModelLoadContext ctx)
+        public AdaptiveSingularSpectrumSequenceModelerInternal(IHostEnvironment env, ModelLoadContext ctx)
         {
             Contracts.CheckValue(env, nameof(env));
             _host = env.Register(LoaderSignature);
@@ -1229,14 +1206,14 @@ namespace Microsoft.ML.Transforms.TimeSeries
             _host.CheckParam(data.Schema.Feature.HasValue, nameof(data), "Must have features column.");
             var featureCol = data.Schema.Feature.Value;
             if (featureCol.Type != NumberDataViewType.Single)
-                throw _host.ExceptSchemaMismatch(nameof(data), "feature", featureCol.Name, "float", featureCol.Type.ToString());
+                throw _host.ExceptSchemaMismatch(nameof(data), "feature", featureCol.Name, "Single", featureCol.Type.ToString());
 
             Single[] dataArray = new Single[_trainSize];
 
             int count = 0;
             using (var cursor = data.Data.GetRowCursor(featureCol))
             {
-                var getVal = cursor.GetGetter<Single>(featureCol.Index);
+                var getVal = cursor.GetGetter<Single>(featureCol);
                 Single val = default;
                 while (cursor.MoveNext() && count < _trainSize)
                 {
@@ -1508,7 +1485,7 @@ namespace Microsoft.ML.Transforms.TimeSeries
 
         internal override SequenceModelerBase<Single, Single> Clone()
         {
-            return new AdaptiveSingularSpectrumSequenceModeler(this);
+            return new AdaptiveSingularSpectrumSequenceModelerInternal(this);
         }
 
         /// <summary>
@@ -1546,6 +1523,49 @@ namespace Microsoft.ML.Transforms.TimeSeries
 
             forecast.UpperBound = upper.Commit();
             forecast.LowerBound = lower.Commit();
+        }
+
+        public void Train(IDataView dataView, string inputColumnName) => Train(new RoleMappedData(dataView, null, inputColumnName));
+
+        public float[] Forecast(int horizon)
+        {
+            ForecastResultBase<float> result = null;
+            Forecast(ref result, horizon);
+            return result.PointForecast.GetValues().ToArray();
+        }
+
+        public void ForecastWithConfidenceIntervals(int horizon, out float[] forecast, out float[] confidenceIntervalLowerBounds, out float[] confidenceIntervalUpperBounds, float confidenceLevel = 0.95f)
+        {
+            ForecastResultBase<float> result = null;
+            Forecast(ref result, horizon);
+            SsaForecastResult ssaResult = (SsaForecastResult)result;
+            ComputeForecastIntervals(ref ssaResult, confidenceLevel);
+            forecast = result.PointForecast.GetValues().ToArray();
+            confidenceIntervalLowerBounds = ssaResult.LowerBound.GetValues().ToArray();
+            confidenceIntervalUpperBounds = ssaResult.UpperBound.GetValues().ToArray();
+        }
+
+        public void Update(IDataView dataView, string inputColumnName)
+        {
+            _host.CheckParam(dataView != null, nameof(dataView), "The input series for updating cannot be null.");
+
+            var data = new RoleMappedData(dataView, null, inputColumnName);
+            if (data.Schema.Feature.Value.Type != NumberDataViewType.Single)
+                throw _host.ExceptUserArg(nameof(data.Schema.Feature.Value.Name), "The time series input column has " +
+                    "type '{0}', but must be a float.", data.Schema.Feature.Value.Type);
+
+            var col = data.Schema.Feature.Value;
+            using (var cursor = data.Data.GetRowCursor(data.Data.Schema))
+            {
+                var getVal = cursor.GetGetter<Single>(col);
+                Single val = default(Single);
+                while (cursor.MoveNext())
+                {
+                    getVal(ref val);
+                    if (!Single.IsNaN(val))
+                        Consume(ref val);
+                }
+            }
         }
     }
 }

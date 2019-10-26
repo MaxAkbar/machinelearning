@@ -9,9 +9,8 @@ using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
 using Microsoft.ML.Internal.Internallearn;
+using Microsoft.ML.Runtime;
 using Microsoft.ML.Trainers.Ensemble;
-using Microsoft.ML.Trainers.Online;
-using Microsoft.ML.Training;
 
 [assembly: LoadableClass(typeof(RegressionEnsembleTrainer), typeof(RegressionEnsembleTrainer.Arguments),
     new[] { typeof(SignatureRegressorTrainer), typeof(SignatureTrainer) },
@@ -24,7 +23,9 @@ using Microsoft.ML.Training;
 namespace Microsoft.ML.Trainers.Ensemble
 {
     using TScalarPredictor = IPredictorProducing<Single>;
-    internal sealed class RegressionEnsembleTrainer : EnsembleTrainerBase<Single, TScalarPredictor,
+    using TScalarTrainer = ITrainerEstimator<ISingleFeaturePredictionTransformer<IPredictorProducing<float>>, IPredictorProducing<float>>;
+
+    internal sealed class RegressionEnsembleTrainer : EnsembleTrainerBase<Single,
        IRegressionSubModelSelector, IRegressionOutputCombiner>,
        IModelCombiner
     {
@@ -43,20 +44,15 @@ namespace Microsoft.ML.Trainers.Ensemble
 
             // REVIEW: If we make this public again it should be an *estimator* of this type of predictor, rather than the (deprecated) ITrainer.
             [Argument(ArgumentType.Multiple, HelpText = "Base predictor type", ShortName = "bp,basePredictorTypes", SortOrder = 1, Visibility = ArgumentAttribute.VisibilityType.CmdLineOnly, SignatureType = typeof(SignatureRegressorTrainer))]
-            public IComponentFactory<ITrainer<TScalarPredictor>>[] BasePredictors;
+            public IComponentFactory<TScalarTrainer>[] BasePredictors;
 
-            internal override IComponentFactory<ITrainer<TScalarPredictor>>[] GetPredictorFactories() => BasePredictors;
+            internal override IComponentFactory<TScalarTrainer>[] GetPredictorFactories() => BasePredictors;
 
             public Arguments()
             {
                 BasePredictors = new[]
                 {
-                    ComponentFactoryUtils.CreateFromFunction(
-                        env => {
-                            var trainerEstimator = new OnlineGradientDescentTrainer(env);
-                            return TrainerUtils.MapTrainerEstimatorToTrainer<OnlineGradientDescentTrainer,
-                                LinearRegressionModelParameters, LinearRegressionModelParameters>(env, trainerEstimator);
-                        })
+                    ComponentFactoryUtils.CreateFromFunction(env => new OnlineGradientDescentTrainer(env, LabelColumnName, FeatureColumnName))
                 };
             }
         }
@@ -79,7 +75,7 @@ namespace Microsoft.ML.Trainers.Ensemble
 
         private protected override PredictionKind PredictionKind => PredictionKind.Regression;
 
-        private protected override TScalarPredictor CreatePredictor(List<FeatureSubsetModel<float>> models)
+        private protected override IPredictor CreatePredictor(List<FeatureSubsetModel<float>> models)
         {
             return new EnsembleModelParameters(Host, PredictionKind, CreateModels<TScalarPredictor>(models), Combiner);
         }

@@ -11,12 +11,12 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
-using Microsoft.Data.DataView;
 using Microsoft.ML;
 using Microsoft.ML.CommandLine;
 using Microsoft.ML.Data;
 using Microsoft.ML.Data.IO;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Runtime;
 
 [assembly: LoadableClass(BinarySaver.Summary, typeof(BinarySaver), typeof(BinarySaver.Arguments), typeof(SignatureDataSaver),
     "Binary Saver", "BinarySaver", "Binary")]
@@ -116,7 +116,7 @@ namespace Microsoft.ML.Data.IO
                 var codec = col.Codec as IValueCodec<T>;
                 Contracts.AssertValue(codec);
                 _codec = codec;
-                _getter = cursor.GetGetter<T>(col.SourceIndex);
+                _getter = cursor.GetGetter<T>(cursor.Schema[col.SourceIndex]);
             }
 
             public override void BeginBlock()
@@ -275,7 +275,7 @@ namespace Microsoft.ML.Data.IO
             // track of the location and size of each for when we write the metadata table of contents.
             // (To be clear, this specific layout is not required by the format.)
 
-            foreach (var metaColumn in schema[col].Metadata.Schema)
+            foreach (var metaColumn in schema[col].Annotations.Schema)
             {
                 _host.Check(!string.IsNullOrEmpty(metaColumn.Name), "Metadata with null or empty kind detected, disallowed");
                 _host.Check(metaColumn.Type != null, "Metadata with null type detected, disallowed");
@@ -355,7 +355,7 @@ namespace Microsoft.ML.Data.IO
             }
             IValueCodec<T> codec = (IValueCodec<T>)generalCodec;
             T value = default(T);
-            schema[col].Metadata.GetValue(kind, ref value);
+            schema[col].Annotations.GetValue(kind, ref value);
 
             // Metadatas will often be pretty small, so that compression makes no sense.
             // We try both a compressed and uncompressed version of metadata and
@@ -565,7 +565,7 @@ namespace Microsoft.ML.Data.IO
         }
 
         private void FetchWorker(BlockingCollection<Block> toCompress, IDataView data,
-            ColumnCodec[] activeColumns, int rowsPerBlock, Stopwatch sw, IChannel ch, IProgressChannel pch, ExceptionMarshaller exMarshaller)
+            ColumnCodec[] activeColumns, int rowsPerBlock, IChannel ch, IProgressChannel pch, ExceptionMarshaller exMarshaller)
         {
             Contracts.AssertValue(ch);
             Contracts.AssertValueOrNull(pch);
@@ -575,7 +575,6 @@ namespace Microsoft.ML.Data.IO
                 ch.AssertValue(toCompress);
                 ch.AssertValue(data);
                 ch.AssertValue(activeColumns);
-                ch.AssertValue(sw);
                 ch.Assert(rowsPerBlock > 0);
 
                 // The main thread handles fetching from the cursor, and storing it into blocks passed to toCompress.
@@ -684,7 +683,7 @@ namespace Microsoft.ML.Data.IO
                 // pattern of utilizing exMarshaller.
                 using (var pch = _silent ? null : _host.StartProgressChannel("BinarySaver"))
                 {
-                    FetchWorker(toCompress, data, activeColumns, rowsPerBlock, sw, ch, pch, exMarshaller);
+                    FetchWorker(toCompress, data, activeColumns, rowsPerBlock, ch, pch, exMarshaller);
                 }
 
                 _host.Assert(compressionTask != null || toCompress.IsCompleted);
@@ -776,7 +775,7 @@ namespace Microsoft.ML.Data.IO
         private void EstimatorCore<T>(DataViewRowCursor cursor, ColumnCodec col,
             out Func<long> fetchWriteEstimator, out IValueWriter writer)
         {
-            ValueGetter<T> getter = cursor.GetGetter<T>(col.SourceIndex);
+            ValueGetter<T> getter = cursor.GetGetter<T>(cursor.Schema[col.SourceIndex]);
             IValueCodec<T> codec = col.Codec as IValueCodec<T>;
             _host.AssertValue(codec);
             IValueWriter<T> specificWriter = codec.OpenWriter(Stream.Null);

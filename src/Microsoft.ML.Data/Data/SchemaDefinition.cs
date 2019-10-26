@@ -6,88 +6,118 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using Microsoft.Data.DataView;
 using Microsoft.ML.Internal.Utilities;
+using Microsoft.ML.Runtime;
 
 namespace Microsoft.ML.Data
 {
     /// <summary>
-    /// Attach to a member of a class to indicate that the item type should be of class key.
+    /// Allow member to be marked as a <see cref="KeyDataViewType"/>.
     /// </summary>
+    /// <remarks>
+    /// Can be applied only for member of following types: <see cref="byte"/>, <see cref="ushort"/>, <see cref="uint"/>, <see cref="ulong"/>
+    /// </remarks>
     [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
     public sealed class KeyTypeAttribute : Attribute
     {
-        // REVIEW: Property based, but should I just have a constructor?
+        /// <summary>
+        /// Marks member as <see cref="KeyDataViewType"/>.
+        /// </summary>
+        /// <remarks>
+        /// Cardinality of <see cref="KeyDataViewType"/> would be maximum legal value of member type.
+        /// </remarks>
+        public KeyTypeAttribute()
+        {
+            throw Contracts.ExceptNotSupp("Using KeyType without the Count parameter is not supported");
+        }
+
+        /// <summary>
+        /// Marks member as <see cref="KeyDataViewType"/> and specifies <see cref="KeyDataViewType"/> cardinality.
+        /// In case of the attribute being used with int types, the <paramref name="count"/> should be set to one more than
+        /// the maximum value to account for counting starting at 1 (0 is reserved for the missing KeyType). E.g the cardinality of the
+        /// 0-9 range is 10.
+        /// If the values are outside of the specified cardinality they will be mapped to the missing value representation: 0.
+        /// </summary>
+        /// <param name="count">Cardinality of <see cref="KeyDataViewType"/>.</param>
+        public KeyTypeAttribute(ulong count)
+        {
+            KeyCount = new KeyCount(count);
+        }
 
         /// <summary>
         /// The key count.
         /// </summary>
-        public ulong Count { get; set; }
+        internal KeyCount KeyCount { get; }
     }
 
     /// <summary>
-    /// Allows a member to be marked as a vector valued field, primarily allowing one to set
+    /// Allows a member to be marked as a <see cref="VectorDataViewType"/>, primarily allowing one to set
     /// the dimensionality of the resulting array.
     /// </summary>
     [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
     public sealed class VectorTypeAttribute : Attribute
     {
-        private readonly int[] _dims;
-
         /// <summary>
         /// The length of the vectors from this vector valued field.
         /// </summary>
-        public int[] Dims { get { return _dims; } }
+        internal int[] Dims { get; }
 
-        public VectorTypeAttribute(params int[] dims)
+        /// <summary>
+        /// Mark member as single-dimensional array with unknown size.
+        /// </summary>
+        public VectorTypeAttribute()
         {
-            _dims = dims;
+
         }
-    }
-
-    /// <summary>
-    /// Describes column information such as name and the source columns indicies that this
-    /// column encapsulates.
-    /// </summary>
-    [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
-    public sealed class ColumnAttribute : Attribute
-    {
-        public ColumnAttribute(string ordinal, string name = null)
+        /// <summary>
+        /// Mark member as single-dimensional array with specified size.
+        /// </summary>
+        /// <param name="size">Expected size of array. A zero value indicates that the vector type is considered to have unknown length.</param>
+        public VectorTypeAttribute(int size)
         {
-            Name = name;
+            Contracts.CheckParam(size >= 0, nameof(size), "Should be non-negative number");
+            Dims = new int[1] { size };
         }
 
         /// <summary>
-        /// Column name.
+        /// Mark member with expected dimensions of array.
         /// </summary>
-        public string Name { get; }
+        /// <param name="dimensions">Dimensions of array. All values should be non-negative.
+        /// A zero value indicates that the vector type is considered to have unknown length along that dimension.</param>
+        public VectorTypeAttribute(params int[] dimensions)
+        {
+            foreach (var size in dimensions)
+            {
+                Contracts.CheckParam(size >= 0, nameof(dimensions), "Should contain only non-negative values");
+            }
+            Dims = dimensions;
+        }
     }
 
     /// <summary>
-    /// Allows a member to specify its column name directly, as opposed to the default
+    /// Allows a member to specify <see cref="IDataView"/> column name directly, as opposed to the default
     /// behavior of using the member name as the column name.
     /// </summary>
     [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
     public sealed class ColumnNameAttribute : Attribute
     {
-        private readonly string _name;
         /// <summary>
         /// Column name.
         /// </summary>
-        public string Name { get { return _name; } }
+        internal string Name { get; }
 
         /// <summary>
-        /// Allows one to specify a name to expose this column as, as opposed to simply
-        /// the field name.
+        /// Allows one to specify a name to expose this column as, as opposed to the default
+        /// behavior of using the member name as the column name.
         /// </summary>
         public ColumnNameAttribute(string name)
         {
-            _name = name;
+            Name = name;
         }
     }
 
     /// <summary>
-    /// Mark this member as not being exposed as a column in the schema.
+    /// Mark this member as not being exposed as a <see cref="IDataView"/> column in the <see cref="DataViewSchema"/>.
     /// </summary>
     [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
     public sealed class NoColumnAttribute : Attribute
@@ -177,15 +207,14 @@ namespace Microsoft.ML.Data
         /// </summary>
         public sealed class Column
         {
-            private readonly Dictionary<string, MetadataInfo> _metadata;
-            internal Dictionary<string, MetadataInfo> Metadata { get { return _metadata; } }
+            internal Dictionary<string, AnnotationInfo> AnnotationInfos { get; }
 
             /// <summary>
             /// The name of the member the column is taken from. The API
             /// requires this to not be null, and a valid name of a member of
             /// the type for which we are creating a schema.
             /// </summary>
-            public string MemberName { get; set; }
+            public string MemberName { get; }
             /// <summary>
             /// The name of the column that's created in the data view. If this
             /// is null, the API uses the <see cref="MemberName"/>.
@@ -198,74 +227,65 @@ namespace Microsoft.ML.Data
             public DataViewType ColumnType { get; set; }
 
             /// <summary>
-            /// Whether the column is a computed type.
-            /// </summary>
-            public bool IsComputed { get { return Generator != null; } }
-
-            /// <summary>
             /// The generator function. if the column is computed.
             /// </summary>
-            public Delegate Generator { get; set; }
+            internal Delegate Generator { get; set; }
 
-            public Type ReturnType => Generator?.GetMethodInfo().GetParameters().LastOrDefault().ParameterType.GetElementType();
+            internal Type ReturnType => Generator?.GetMethodInfo().GetParameters().LastOrDefault().ParameterType.GetElementType();
 
-            public Column(IExceptionContext ectx, string memberName, DataViewType columnType,
-                string columnName = null, IEnumerable<MetadataInfo> metadataInfos = null, Delegate generator = null)
+            internal Column(string memberName, DataViewType columnType,
+                string columnName = null)
             {
-                ectx.CheckNonEmpty(memberName, nameof(memberName));
+                Contracts.CheckNonEmpty(memberName, nameof(memberName));
                 MemberName = memberName;
                 ColumnName = columnName ?? memberName;
                 ColumnType = columnType;
-                Generator = generator;
-                _metadata = metadataInfos != null ?
-                    metadataInfos.ToDictionary(m => m.Kind, m => m)
-                    : new Dictionary<string, MetadataInfo>();
-            }
-
-            public Column()
-            {
-                _metadata = _metadata ?? new Dictionary<string, MetadataInfo>();
+                AnnotationInfos = new Dictionary<string, AnnotationInfo>();
             }
 
             /// <summary>
-            /// Add metadata to the column.
+            /// Add annotation to the column.
             /// </summary>
-            /// <typeparam name="T">Type of Metadata being added. Types suported as entries in columns
-            /// are also supported as entries in Metadata. Multiple metadata may be added to one column.
+            /// <typeparam name="T">Type of annotation being added. Types suported as entries in columns
+            /// are also supported as entries in Annotations. Multiple annotations may be added to one column.
             /// </typeparam>
-            /// <param name="kind">The string identifier of the metadata.</param>
-            /// <param name="value">Value of metadata.</param>
-            /// <param name="metadataType">Type of value.</param>
-            public void AddMetadata<T>(string kind, T value, DataViewType metadataType = null)
+            /// <param name="kind">The string identifier of the annotation.</param>
+            /// <param name="value">Value of annotation.</param>
+            /// <param name="annotationType">Type of value.</param>
+            public void AddAnnotation<T>(string kind, T value, DataViewType annotationType)
             {
-                if (_metadata.ContainsKey(kind))
-                    throw Contracts.Except("Column already contains metadata of this kind.");
-                _metadata[kind] = new MetadataInfo<T>(kind, value, metadataType);
+                Contracts.CheckValue(kind, nameof(kind));
+                Contracts.CheckValue(annotationType, nameof(annotationType));
+
+                if (AnnotationInfos.ContainsKey(kind))
+                    throw Contracts.Except("Column already contains an annotation of this kind.");
+                AnnotationInfos[kind] = new AnnotationInfo<T>(kind, value, annotationType);
+            }
+
+            internal void AddAnnotation(string kind, AnnotationInfo info)
+            {
+                AnnotationInfos[kind] = info;
             }
 
             /// <summary>
-            /// Remove metadata from the column if it exists.
+            /// Returns annotations kind and type associated with this column.
             /// </summary>
-            /// <param name="kind">The string identifier of the metadata. </param>
-            public void RemoveMetadata(string kind)
-            {
-                if (_metadata.ContainsKey(kind))
-                    _metadata.Remove(kind);
-                throw Contracts.Except("Column does not contain metadata of kind: " + kind);
-            }
-
-            /// <summary>
-            /// Returns metadata kind and type associated with this column.
-            /// </summary>
-            /// <returns>A dictionary with the kind of the metadata as the key, and the
-            /// metadata type as the associated value.</returns>
-            public IEnumerable<KeyValuePair<string, DataViewType>> GetMetadataTypes
+            /// <returns>A dictionary with the kind of the annotation as the key, and the
+            /// annotation type as the associated value.</returns>
+            public DataViewSchema.Annotations Annotations
             {
                 get
                 {
-                    return Metadata.Select(x => new KeyValuePair<string, DataViewType>(x.Key, x.Value.MetadataType));
+                    var builder = new DataViewSchema.Annotations.Builder();
+                    foreach (var kvp in AnnotationInfos)
+                        builder.Add(kvp.Key, kvp.Value.AnnotationType, kvp.Value.GetGetterDelegate());
+                    return builder.ToAnnotations();
                 }
             }
+        }
+
+        private SchemaDefinition()
+        {
         }
 
         /// <summary>
@@ -362,9 +382,19 @@ namespace Microsoft.ML.Data
                 if (memberInfo.GetCustomAttribute<NoColumnAttribute>() != null)
                     continue;
 
-                var mappingAttr = memberInfo.GetCustomAttribute<ColumnAttribute>();
+                var customAttributes = memberInfo.GetCustomAttributes();
+                var customTypeAttributes = customAttributes.Where(x => x is DataViewTypeAttribute);
+                if (customTypeAttributes.Count() > 1)
+                    throw Contracts.ExceptParam(nameof(userType), "Member {0} cannot be marked with multiple attributes, {1}, derived from {2}.",
+                        memberInfo.Name, customTypeAttributes, typeof(DataViewTypeAttribute));
+                else if (customTypeAttributes.Count() == 1)
+                {
+                    var customTypeAttribute = (DataViewTypeAttribute)customTypeAttributes.First();
+                    customTypeAttribute.Register();
+                }
+
                 var mappingNameAttr = memberInfo.GetCustomAttribute<ColumnNameAttribute>();
-                string name = mappingAttr?.Name ?? mappingNameAttr?.Name ?? memberInfo.Name;
+                string name = mappingNameAttr?.Name ?? memberInfo.Name;
                 // Disallow duplicate names, because the field enumeration order is not actually
                 // well defined, so we are not gauranteed to have consistent "hiding" from run to
                 // run, across different .NET versions.
@@ -373,36 +403,44 @@ namespace Microsoft.ML.Data
 
                 InternalSchemaDefinition.GetVectorAndItemType(memberInfo, out bool isVector, out Type dataType);
 
-                PrimitiveDataViewType itemType;
-                var keyAttr = memberInfo.GetCustomAttribute<KeyTypeAttribute>();
-                if (keyAttr != null)
-                {
-                    if (!KeyType.IsValidDataType(dataType))
-                        throw Contracts.ExceptParam(nameof(userType), "Member {0} marked with KeyType attribute, but does not appear to be a valid kind of data for a key type", memberInfo.Name);
-                    itemType = new KeyType(dataType, keyAttr.Count);
-                }
-                else
-                    itemType = ColumnTypeExtensions.PrimitiveTypeFromType(dataType);
-
                 // Get the column type.
                 DataViewType columnType;
-                var vectorAttr = memberInfo.GetCustomAttribute<VectorTypeAttribute>();
-                if (vectorAttr != null && !isVector)
-                    throw Contracts.ExceptParam(nameof(userType), "Member {0} marked with VectorType attribute, but does not appear to be a vector type", memberInfo.Name);
-                if (isVector)
+                if (!DataViewTypeManager.Knows(dataType, customAttributes))
                 {
-                    int[] dims = vectorAttr?.Dims;
-                    if (dims != null && dims.Any(d => d < 0))
-                        throw Contracts.ExceptParam(nameof(userType), "Some of member {0}'s dimension lengths are negative");
-                    if (Utils.Size(dims) == 0)
-                        columnType = new VectorType(itemType, 0);
+                    PrimitiveDataViewType itemType;
+                    var keyAttr = memberInfo.GetCustomAttribute<KeyTypeAttribute>();
+                    if (keyAttr != null)
+                    {
+                        if (!KeyDataViewType.IsValidDataType(dataType))
+                            throw Contracts.ExceptParam(nameof(userType), "Member {0} marked with KeyType attribute, but does not appear to be a valid kind of data for a key type", memberInfo.Name);
+                        if (keyAttr.KeyCount == null)
+                            itemType = new KeyDataViewType(dataType, dataType.ToMaxInt());
+                        else
+                            itemType = new KeyDataViewType(dataType, keyAttr.KeyCount.Count.GetValueOrDefault());
+                    }
                     else
-                        columnType = new VectorType(itemType, dims);
+                        itemType = ColumnTypeExtensions.PrimitiveTypeFromType(dataType);
+
+                    var vectorAttr = memberInfo.GetCustomAttribute<VectorTypeAttribute>();
+                    if (vectorAttr != null && !isVector)
+                        throw Contracts.ExceptParam(nameof(userType), $"Member {memberInfo.Name} marked with {nameof(VectorTypeAttribute)}, but does not appear to be a vector type", memberInfo.Name);
+                    if (isVector)
+                    {
+                        int[] dims = vectorAttr?.Dims;
+                        if (dims != null && dims.Any(d => d < 0))
+                            throw Contracts.ExceptParam(nameof(userType), "Some of member {0}'s dimension lengths are negative");
+                        if (Utils.Size(dims) == 0)
+                            columnType = new VectorDataViewType(itemType, 0);
+                        else
+                            columnType = new VectorDataViewType(itemType, dims);
+                    }
+                    else
+                        columnType = itemType;
                 }
                 else
-                    columnType = itemType;
+                    columnType = DataViewTypeManager.GetDataViewType(dataType, customAttributes);
 
-                cols.Add(new Column() { MemberName = memberInfo.Name, ColumnName = name, ColumnType = columnType });
+                cols.Add(new Column(memberInfo.Name, columnType, name));
             }
             return cols;
         }

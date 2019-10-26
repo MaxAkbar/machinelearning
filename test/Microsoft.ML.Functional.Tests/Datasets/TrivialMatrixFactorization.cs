@@ -3,8 +3,6 @@
 // See the LICENSE file in the project root for more information.
 
 
-using System;
-using Microsoft.Data.DataView;
 using Microsoft.ML.Data;
 
 namespace Microsoft.ML.Functional.Tests.Datasets
@@ -26,7 +24,7 @@ namespace Microsoft.ML.Functional.Tests.Datasets
         public static IDataView LoadAndFeaturizeFromTextFile(MLContext mlContext, string filePath, bool hasHeader, char separatorChar)
         {
             // Load the data from a textfile.
-            var data = mlContext.Data.ReadFromTextFile<TrivialMatrixFactorization>(filePath, hasHeader: hasHeader, separatorChar: separatorChar);
+            var data = mlContext.Data.LoadFromTextFile<TrivialMatrixFactorization>(filePath, hasHeader: hasHeader, separatorChar: separatorChar);
 
             // Describe a pipeline to translate the uints to keys.
             var pipeline = mlContext.Transforms.Conversion.MapValueToKey("MatrixColumnIndex")
